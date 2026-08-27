@@ -30,6 +30,7 @@ from app.models import (
 )
 from app.schemas.loot_plan_persistence import (
     ActiveLootPlanError,
+    LootPlanStalenessState,
     LootPlanValidationError,
     PersistedLootAssignment,
     PersistedLootParticipant,
@@ -37,6 +38,7 @@ from app.schemas.loot_plan_persistence import (
     PersistedLootPlanResult,
     PersistedLootRun,
 )
+from app.services.loot_plan_source import SOURCE_SNAPSHOT_VERSION, build_source_snapshot
 from app.services.loot_planning import calculate_regular_loot_plan, plan_split_savage_loot
 from app.services.weeks import ResetPeriodPolicy
 
@@ -66,6 +68,10 @@ def generate_and_persist_loot_plan(
         warning_messages = tuple(issue.message for issue in proposal.warnings)
         with session.begin_nested():
             week = _get_or_create_target_week(session, static, tier.id, target_week, mode)
+            participant_ids = _proposal_character_ids(proposal, mode)
+            source_snapshot, source_state_hash = build_source_snapshot(
+                session, static.id, mode, target_week, tier.id, participant_ids
+            )
             active = session.scalar(
                 select(LootPlan).where(
                     LootPlan.reclear_week_id == week.id,
@@ -80,6 +86,9 @@ def generate_and_persist_loot_plan(
                 mode=mode,
                 status=WeeklyLootPlanStatus.DRAFT,
                 created_by_discord_user_id=creator_discord_user_id,
+                source_snapshot_version=SOURCE_SNAPSHOT_VERSION,
+                source_snapshot=source_snapshot,
+                source_state_hash=source_state_hash,
             )
             _populate_plan(session, plan, proposal, tier.id)
             session.add(plan)
@@ -219,6 +228,14 @@ def _proposal_runs(proposal, mode):
     if mode is ClearMode.REGULAR:
         return (proposal.run,)
     return (proposal.winner.run_a, proposal.winner.run_b)
+
+
+def _proposal_character_ids(proposal, mode):
+    return tuple(
+        participant.character_id
+        for run in _proposal_runs(proposal, mode)
+        for participant in run.participants
+    )
 
 
 def _assignment_specs(proposal, mode, run):
@@ -458,6 +475,22 @@ def _result_from_plan(plan, warnings=()):
         plan.created_at,
         tuple(runs),
         validation_warnings=tuple(warnings),
+        snapshot_version=plan.source_snapshot_version,
+        stored_source_hash=plan.source_state_hash,
+        staleness=(
+            LootPlanStalenessState.CURRENT
+            if plan.source_snapshot_version == SOURCE_SNAPSHOT_VERSION
+            and plan.source_snapshot
+            and plan.source_state_hash
+            else LootPlanStalenessState.UNVERIFIABLE
+        ),
+        confirmation_blocked=not (
+            plan.source_snapshot_version == SOURCE_SNAPSHOT_VERSION
+            and plan.source_snapshot
+            and plan.source_state_hash
+        ),
+        applied_at=plan.applied_at,
+        cancelled_at=plan.cancelled_at,
     )
 
 

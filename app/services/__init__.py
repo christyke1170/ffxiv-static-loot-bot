@@ -16,6 +16,11 @@ from app.services.imports import (
     import_bis_sets,
     import_raid_tier,
 )
+from app.services.loot_plan_lifecycle import (
+    cancel_loot_plan,
+    check_loot_plan_staleness,
+    load_active_loot_plan,
+)
 from app.services.loot_plan_persistence import (
     generate_and_persist_loot_plan,
     load_persisted_loot_plan,
@@ -56,6 +61,9 @@ __all__ = [
     "generate_weekly_loot_plan",
     "generate_and_persist_loot_plan",
     "load_persisted_loot_plan",
+    "check_loot_plan_staleness",
+    "load_active_loot_plan",
+    "cancel_loot_plan",
     "import_bis_sets",
     "import_raid_tier",
     "seed_reference_data",

@@ -125,6 +125,12 @@
   for later loading. Materials and paired weapon components remain proposals until confirmation.
 - Only one active generated plan is allowed for a static, raid tier, and target week. Persisting a plan
   does not apply loot or advance the static's week.
+- New generated plans store a versioned authoritative source-state snapshot and deterministic hash.
+  Relevant planning-state changes make READY plans stale; book changes do not affect staleness.
+  Historical active plans without a supported snapshot are unverifiable.
+- Active plans can be loaded by static, tier, and target week. DRAFT and READY plans may be cancelled;
+  applied plans cannot be cancelled. Cancellation preserves the historical plan contents and applies
+  no loot.
 - The complete Split comparison order is Main Savage vector, Twine score, Glaze score, completed-DPS
   carry balance, useful Alt Savage total, Alt Savage vector, useful paired Alt weapon upgrades, then
   canonical candidate order. Books remain excluded from all Split planning scores and eligibility.

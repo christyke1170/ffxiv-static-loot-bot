@@ -2,8 +2,14 @@
 
 from app.schemas.confirmations import ConfirmationError, ConfirmationProgress, ConfirmationQueueItem
 from app.schemas.loot_plan_persistence import (
+    ActiveLootPlanConflict,
     ActiveLootPlanError,
+    LootPlanAlreadyCancelled,
     LootPlanPersistenceError,
+    LootPlanStalenessResult,
+    LootPlanStalenessState,
+    LootPlanStaleReason,
+    LootPlanStaleReasonCode,
     LootPlanValidationError,
     PersistedLootAssignment,
     PersistedLootParticipant,
@@ -109,7 +115,13 @@ __all__ = [
     "ConfirmationProgress",
     "ConfirmationQueueItem",
     "ActiveLootPlanError",
+    "ActiveLootPlanConflict",
+    "LootPlanAlreadyCancelled",
     "LootPlanPersistenceError",
+    "LootPlanStaleReason",
+    "LootPlanStaleReasonCode",
+    "LootPlanStalenessResult",
+    "LootPlanStalenessState",
     "LootPlanValidationError",
     "PersistedLootAssignment",
     "PersistedLootParticipant",

@@ -557,6 +557,9 @@ class LootPlan(Base):
     )
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_snapshot_version: Mapped[int | None] = mapped_column(Integer)
+    source_snapshot: Mapped[str | None] = mapped_column(Text)
+    source_state_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     reclear_week: Mapped[ReclearWeek] = relationship()
     runs: Mapped[list["LootPlanRun"]] = relationship(
         back_populates="loot_plan", cascade="all, delete-orphan", order_by="LootPlanRun.run_number"
