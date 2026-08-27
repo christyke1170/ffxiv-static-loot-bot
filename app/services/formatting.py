@@ -65,14 +65,8 @@ CLASSIFICATION_LABEL = {
     GearClassification.SAVAGE: "Savage",
     GearClassification.AUGMENTED_TOME: "Tome Up",
     GearClassification.TOME: "Tome",
-    GearClassification.CRAFTED: "Crafted",
-    GearClassification.EX_WEAPON: "EX weapon",
+    GearClassification.CRAFTED_EX: "Crafted / EX",
     GearClassification.GARBAGE: "Garbage",
-    GearClassification.CATCHUP: "Catchup",
-    GearClassification.RELIC: "Relic",
-    GearClassification.NORMAL_RAID: "Normal",
-    GearClassification.EITHER: "Either",
-    GearClassification.OTHER: "Other",
     GearClassification.NOT_APPLICABLE: "N/A",
 }
 LEGEND = (
@@ -96,6 +90,7 @@ def overview_table(board: StaticGearBoard, page: int = 0) -> tuple[str, tuple[st
     warnings = list(board.warnings)
     for player in players:
         warnings.extend(player.warnings)
+        warnings.extend(player.item_level_warnings)
     if not players:
         return "No active main characters.", tuple(dict.fromkeys(warnings))
     lines = []
@@ -106,6 +101,8 @@ def overview_table(board: StaticGearBoard, page: int = 0) -> tuple[str, tuple[st
         kind = truncate(player.character_kind.title(), 8)
         job = truncate(player.job or "?", 8)
         lines.append(f"{name} · {job} · {kind}")
+        average = player.average_item_level if player.average_item_level is not None else "N/A"
+        lines.append(f"Average iLevel: {average}")
         lines.append(
             f"{player.complete_slots}/{player.applicable_slots} complete | "
             f"Savage {_remaining_classification_needs(player, GearClassification.SAVAGE)} | "
@@ -155,7 +152,11 @@ def _remaining_tome_needs(player: BoardPlayer) -> int:
 
 
 def player_table(player: BoardPlayer) -> tuple[str, tuple[str, ...]]:
-    lines = [_row(("Slot", "Desired", "Current", "Status"), (10, 12, 12, 18))]
+    average = player.average_item_level if player.average_item_level is not None else "N/A"
+    lines = [
+        f"Average iLevel: {average}",
+        _row(("Slot", "Desired", "Current", "Status"), (10, 12, 12, 18)),
+    ]
     for slot in player.slots:
         lines.append(
             _row(
@@ -168,7 +169,9 @@ def player_table(player: BoardPlayer) -> tuple[str, tuple[str, ...]]:
                 (10, 12, 12, 18),
             )
         )
-    return _bounded_codeblock(lines), player.warnings
+    return _bounded_codeblock(lines), tuple(
+        dict.fromkeys((*player.warnings, *player.item_level_warnings))
+    )
 
 
 def player_books(player: BoardPlayer) -> str:

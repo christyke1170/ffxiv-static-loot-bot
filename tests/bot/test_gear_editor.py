@@ -74,7 +74,7 @@ def arrange_editor(bot, job_code="PLD", *, include_alt=False):
             CharacterGearSlot(
                 character=character,
                 gear_slot=weapon,
-                current_classification=GearClassification.CRAFTED,
+                current_classification=GearClassification.CRAFTED_EX,
             )
         )
         session.commit()
@@ -157,7 +157,7 @@ async def test_editor_is_ephemeral_and_slots_are_ordered_with_current_state(
     assert message["ephemeral"] is True
     options = select_component(view, "gear-editor:slot").options
     assert [option.label for option in options] == [SLOT_LABEL[code.value] for code in GearSlotCode]
-    assert options[0].description == "Current: Crafted"
+    assert options[0].description == "Current: Crafted / EX"
     assert all(option.description.startswith("Current: ") for option in options)
     assert len(list(view.walk_children())) <= MAX_COMPONENTS
     assert [option.label for option in select_component(view, "gear-editor:state").options] == list(
@@ -232,9 +232,7 @@ async def test_adjust_books_updates_all_floors_and_refreshes_without_success_mes
         character = session.get(Character, character_id)
         first = session.scalar(select(RaidFloor).where(RaidFloor.floor_number == 1))
         session.add(
-            CharacterFloorBookBalance(
-                character=character, raid_floor=first, earned=4, spent=2
-            )
+            CharacterFloorBookBalance(character=character, raid_floor=first, earned=4, spent=2)
         )
         session.commit()
     interaction = interaction_factory()
@@ -286,11 +284,14 @@ async def test_adjust_books_rejects_invalid_values_without_changing_any_floor(
 
     assert submitted.messages[0]["ephemeral"] is True
     with bot.session_factory() as session:
-        assert session.scalar(
-            select(CharacterFloorBookBalance).where(
-                CharacterFloorBookBalance.character_id == character_id
+        assert (
+            session.scalar(
+                select(CharacterFloorBookBalance).where(
+                    CharacterFloorBookBalance.character_id == character_id
+                )
             )
-        ) is None
+            is None
+        )
 
 
 async def test_adjust_books_revalidates_owner_permission_and_selected_static(
@@ -322,16 +323,17 @@ async def test_adjust_books_revalidates_owner_permission_and_selected_static(
     await modal.on_submit(cross_static)
     assert cross_static.messages[0]["ephemeral"] is True
     with bot.session_factory() as session:
-        assert session.scalar(
-            select(CharacterFloorBookBalance).where(
-                CharacterFloorBookBalance.character_id == character_id
+        assert (
+            session.scalar(
+                select(CharacterFloorBookBalance).where(
+                    CharacterFloorBookBalance.character_id == character_id
+                )
             )
-        ) is None
+            is None
+        )
 
 
-async def test_adjust_books_fails_clearly_when_tier_exceeds_modal_limit(
-    bot, interaction_factory
-):
+async def test_adjust_books_fails_clearly_when_tier_exceeds_modal_limit(bot, interaction_factory):
     arrange_editor(bot)
     with bot.session_factory() as session:
         tier = session.scalar(select(RaidTier))
@@ -393,9 +395,9 @@ async def test_adjusted_books_propagate_and_main_alt_weekly_state_stays_separate
 
     alt_interaction = interaction_factory()
     await invoke_registered(Gear(bot), "set", alt_interaction, "Editor Administrator", "ALT")
-    assert "Floor 1: 0\nFloor 2: 0\nFloor 3: 0\nFloor 4: 0" in alt_interaction.messages[0][
-        "content"
-    ]
+    assert (
+        "Floor 1: 0\nFloor 2: 0\nFloor 3: 0\nFloor 4: 0" in alt_interaction.messages[0]["content"]
+    )
 
 
 async def test_selecting_states_saves_refreshes_same_editor_and_supports_multiple_slots(
@@ -439,12 +441,12 @@ async def test_ex_weapon_rules_and_offhand_applicability(bot, interaction_factor
     select_component(pld, "gear-editor:slot")._values = [GearSlotCode.OFFHAND.value]
     await pld.select_slot(interaction_factory())
     assert not select_component(pld, "gear-editor:state").disabled
-    select_component(pld, "gear-editor:state")._values = [GearClassification.EX_WEAPON.value]
-    with pytest.raises(ValueError, match="only valid for the Weapon"):
-        await pld.select_state(interaction_factory())
+    select_component(pld, "gear-editor:state")._values = [GearClassification.CRAFTED_EX.value]
+    await pld.select_state(interaction_factory())
 
     other_bot = SimpleNamespace(settings=bot.settings, session_factory=bot.session_factory)
     with other_bot.session_factory() as session:
+        session.query(AuditLog).delete()
         session.query(UserStaticPreference).delete()
         session.query(CharacterGearSlot).delete()
         session.query(Character).delete()
@@ -516,17 +518,17 @@ async def test_every_callback_rechecks_owner_and_current_permission(
     assert lost_permission.messages[0]["ephemeral"] is True
     with bot.session_factory() as session:
         weapon = session.scalar(select(CharacterGearSlot))
-        assert weapon.current_classification is GearClassification.CRAFTED
+        assert weapon.current_classification is GearClassification.CRAFTED_EX
 
 
 async def test_weapon_accepts_ex(bot, interaction_factory):
     _, view = await open_editor(bot, interaction_factory)
     select_component(view, "gear-editor:slot")._values = [GearSlotCode.WEAPON.value]
     await view.select_slot(interaction_factory())
-    select_component(view, "gear-editor:state")._values = [GearClassification.EX_WEAPON.value]
+    select_component(view, "gear-editor:state")._values = [GearClassification.CRAFTED_EX.value]
     await view.select_state(interaction_factory())
     with bot.session_factory() as session:
         assert (
             session.scalar(select(CharacterGearSlot)).current_classification
-            is GearClassification.EX_WEAPON
+            is GearClassification.CRAFTED_EX
         )

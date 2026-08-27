@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import BisSet, GearSlot, Item, Job, LootType, RaidTier
+from app.models import BisSet, GearSlot, Job, LootType, RaidTier
 from app.services import (
     ImportValidationError,
     import_bis_sets,
@@ -73,7 +73,6 @@ def test_invalid_bis_dry_runs_identify_context(
     session.commit()
     item = {
         "slot": "HEAD",
-        "desired_item": "Invalid Item",
         "classification": "TOME",
     }
     row = {"tier_code": "FICTIONAL_ARC", "job": "PLD", "name": "Invalid", "items": [item]}
@@ -90,7 +89,7 @@ def test_duplicate_slots_and_invalid_augmented_tome_rejected(session: Session) -
     seed_reference_data(session)
     import_raid_tier(session, TIER_FIXTURE)
     session.commit()
-    item = {"slot": "HEAD", "desired_item": "Hat", "classification": "AUGMENTED_TOME"}
+    item = {"slot": "HEAD", "classification": "AUGMENTED_TOME"}
     data = {
         "sets": [
             {
@@ -104,7 +103,7 @@ def test_duplicate_slots_and_invalid_augmented_tome_rejected(session: Session) -
     with pytest.raises(ImportValidationError) as error:
         import_bis_sets(session, data, dry_run=True)
     assert "duplicate slot" in str(error.value)
-    assert "base_tome_item" in str(error.value)
+    assert "augmentation_material" in str(error.value)
 
 
 def test_contradictory_not_applicable_import_rejected(session: Session) -> None:
@@ -121,7 +120,7 @@ def test_contradictory_not_applicable_import_rejected(session: Session) -> None:
                     {
                         "slot": "OFFHAND",
                         "classification": "NOT_APPLICABLE",
-                        "desired_item": "This must not be present",
+                        "floor": 1,
                     }
                 ],
             }
@@ -135,7 +134,7 @@ def test_contradictory_not_applicable_import_rejected(session: Session) -> None:
     ("job", "classification", "desired", "message"),
     [
         ("PLD", "NOT_APPLICABLE", None, "PLD OFFHAND must define an applicable"),
-        ("WAR", "CRAFTED", "Fictional Axe Offhand", "WAR OFFHAND must be NOT_APPLICABLE"),
+        ("WAR", "CRAFTED_EX", None, "WAR OFFHAND must be NOT_APPLICABLE"),
     ],
 )
 def test_ffxiv_offhand_rule_is_enforced_during_import(
@@ -185,5 +184,5 @@ def test_unreferenced_bis_reimport_updates_without_duplicates(session: Session) 
     session.commit()
     result = import_bis_sets(session, BIS_FIXTURE)
     assert result.counts.updated == 1
-    assert session.scalar(select(Item).where(Item.name == "Fictional Savage Helm")) is not None
+    assert not hasattr(result[0].items[0], "desired_item_id")
     assert session.scalar(select(func.count()).select_from(BisSet)) == 1

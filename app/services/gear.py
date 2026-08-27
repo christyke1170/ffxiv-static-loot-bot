@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -20,18 +20,16 @@ from app.models import (
     GearSlot,
     GearSlotCode,
     InventoryItem,
-    Item,
+    LootType,
     RaidFloor,
     Static,
-    job_uses_offhand,
 )
 from app.services.imports import ImportValidationError
 from app.services.needs import calculate_character_needs
 
 CURRENT_CLASSIFICATIONS = frozenset(
     {
-        GearClassification.CRAFTED,
-        GearClassification.EX_WEAPON,
+        GearClassification.CRAFTED_EX,
         GearClassification.SAVAGE,
         GearClassification.TOME,
         GearClassification.AUGMENTED_TOME,
@@ -66,51 +64,6 @@ def resolve_character(
     return rows[0]
 
 
-def resolve_item(
-    session: Session,
-    name: str,
-    *,
-    item_level: int | None = None,
-    external_item_id: int | None = None,
-) -> Item:
-    name = name.strip()
-    if not name:
-        raise ValueError("Item name is required.")
-    if item_level is not None and item_level < 0:
-        raise ValueError("Item level cannot be negative.")
-    if external_item_id is not None and external_item_id < 0:
-        raise ValueError("External item ID cannot be negative.")
-    by_name = session.scalar(select(Item).where(func.lower(Item.name) == name.lower()))
-    by_external = (
-        session.scalar(select(Item).where(Item.external_item_id == external_item_id))
-        if external_item_id is not None
-        else None
-    )
-    if by_name is not None and by_external is not None and by_name.id != by_external.id:
-        raise ValueError("Item name and external item ID refer to different existing items.")
-    if (
-        by_name is None
-        and by_external is not None
-        and by_external.name.casefold() != name.casefold()
-    ):
-        raise ValueError("Item name and external item ID refer to different existing items.")
-    item = by_name or by_external
-    if item is None:
-        item = Item(name=name, item_level=item_level, external_item_id=external_item_id)
-        session.add(item)
-        session.flush()
-        return item
-    if external_item_id is not None and item.external_item_id not in (None, external_item_id):
-        raise ValueError("Existing item has a different external item ID.")
-    if item_level is not None and item.item_level not in (None, item_level):
-        raise ValueError("Existing item has a different item level.")
-    if item.external_item_id is None:
-        item.external_item_id = external_item_id
-    if item.item_level is None:
-        item.item_level = item_level
-    return item
-
-
 def set_gear(
     session: Session,
     static: Static,
@@ -120,8 +73,12 @@ def set_gear(
     actor_id: int,
 ) -> CharacterGearSlot:
     _require_character(static, character)
-    _require_applicable_slot(character, slot)
-    _require_current_classification(classification, slot.code)
+    if classification is GearClassification.NOT_APPLICABLE:
+        if slot.code is not GearSlotCode.OFFHAND or character.job.uses_offhand:
+            raise ValueError("NOT_APPLICABLE is valid only for a configured non-offhand job.")
+    else:
+        _require_applicable_slot(character, slot)
+        _require_current_classification(classification, slot.code)
     row = _gear_row(session, character.id, slot.id)
     if row is None:
         row = CharacterGearSlot(
@@ -183,32 +140,65 @@ def set_inventory(
     session: Session,
     static: Static,
     character: Character,
-    item_name: str,
+    slot: GearSlot,
+    classification: GearClassification,
     quantity: int,
     actor_id: int,
-    *,
-    item_level: int | None = None,
-    external_item_id: int | None = None,
 ) -> InventoryItem | None:
     _nonnegative(quantity, "Quantity")
     _require_character(static, character)
-    item = resolve_item(
-        session, item_name, item_level=item_level, external_item_id=external_item_id
-    )
+    _require_applicable_slot(character, slot)
+    _require_current_classification(classification, slot.code)
     row = session.scalar(
         select(InventoryItem).where(
-            InventoryItem.character_id == character.id, InventoryItem.item_id == item.id
+            InventoryItem.character_id == character.id,
+            InventoryItem.gear_slot_id == slot.id,
+            InventoryItem.classification == classification,
         )
     )
     if quantity == 0:
         if row is not None:
             session.delete(row)
     elif row is None:
-        row = InventoryItem(character=character, item=item, quantity=quantity)
+        row = InventoryItem(
+            character=character,
+            gear_slot=slot,
+            classification=classification,
+            quantity=quantity,
+        )
         session.add(row)
     else:
         row.quantity = quantity
     _audit(session, static.id, actor_id, "INVENTORY_SET", "Character", character.id, str(quantity))
+    return row if quantity else None
+
+
+def set_loot_resource(
+    session: Session,
+    static: Static,
+    character: Character,
+    loot_type: LootType,
+    quantity: int,
+    actor_id: int,
+) -> InventoryItem | None:
+    _nonnegative(quantity, "Quantity")
+    _require_character(static, character)
+    if loot_type.raid_tier_id != static.active_raid_tier_id:
+        raise ValueError("Loot resource is not from the selected static's active tier.")
+    row = session.scalar(
+        select(InventoryItem).where(
+            InventoryItem.character_id == character.id,
+            InventoryItem.loot_type_id == loot_type.id,
+        )
+    )
+    if quantity == 0 and row is not None:
+        session.delete(row)
+    elif quantity > 0 and row is None:
+        row = InventoryItem(character=character, loot_type=loot_type, quantity=quantity)
+        session.add(row)
+    elif row is not None:
+        row.quantity = quantity
+    _audit(session, static.id, actor_id, "LOOT_RESOURCE_SET", "Character", character.id)
     return row if quantity else None
 
 
@@ -395,16 +385,30 @@ def import_current_state(
                     actor_id,
                 )
             for inventory in data.get("inventory_items", []):
-                set_inventory(
-                    session,
-                    static,
-                    character,
-                    inventory["item"],
-                    inventory["quantity"],
-                    actor_id,
-                    item_level=inventory.get("item_level"),
-                    external_item_id=inventory.get("external_item_id"),
-                )
+                if "loot_type" in inventory:
+                    loot_type = next(
+                        row
+                        for row in static.active_raid_tier.loot_types
+                        if row.code == inventory["loot_type"]
+                    )
+                    set_loot_resource(
+                        session,
+                        static,
+                        character,
+                        loot_type,
+                        inventory["quantity"],
+                        actor_id,
+                    )
+                else:
+                    set_inventory(
+                        session,
+                        static,
+                        character,
+                        _slot(session, inventory["slot"]),
+                        GearClassification[inventory["classification"]],
+                        inventory["quantity"],
+                        actor_id,
+                    )
             tier = static.active_raid_tier
             for books in data.get("books", []):
                 assert tier is not None  # Validated before any writes.
@@ -479,22 +483,29 @@ def _validate_current_state(session: Session, static: Static, source: Mapping[st
             if session.scalar(select(GearSlot.id).where(GearSlot.code == slot_code)) is None:
                 errors.append(f"{gear_context}.slot: unknown slot {slot_code}")
             classification = gear.get("current_classification")
-            if classification not in {value.name for value in CURRENT_CLASSIFICATIONS}:
+            supported = {value.name for value in CURRENT_CLASSIFICATIONS} | {
+                GearClassification.NOT_APPLICABLE.name
+            }
+            if classification not in supported:
                 errors.append(
                     f"{gear_context}.current_classification: unknown classification "
                     f"{classification}"
                 )
-            elif (
-                classification == GearClassification.EX_WEAPON.name
-                and slot_code != GearSlotCode.WEAPON.name
-            ):
-                errors.append(
-                    f"{gear_context}.current_classification: EX_WEAPON is only valid for Weapon"
+            if slot_code == GearSlotCode.OFFHAND.name:
+                expected = (
+                    classification != GearClassification.NOT_APPLICABLE.name
+                    if not character.job.uses_offhand
+                    else classification == GearClassification.NOT_APPLICABLE.name
                 )
-            if slot_code == GearSlotCode.OFFHAND.name and not job_uses_offhand(
-                character.job.abbreviation
-            ):
-                errors.append(f"{gear_context}.slot: Offhand is N/A for non-PLD jobs")
+                if expected:
+                    errors.append(
+                        f"{gear_context}.current_classification: contradicts configured "
+                        "Offhand capability"
+                    )
+            elif classification == GearClassification.NOT_APPLICABLE.name:
+                errors.append(
+                    f"{gear_context}.current_classification: NOT_APPLICABLE is Offhand-only"
+                )
             for obsolete_field in (
                 "current_item",
                 "current_item_name",
@@ -539,19 +550,16 @@ def _validate_current_state(session: Session, static: Static, source: Mapping[st
                         errors.append(
                             f"{value_context}.{quantity_field}: must be a nonnegative integer"
                         )
-                if field == "inventory_items" and (
-                    not isinstance(value.get("item"), str) or not value.get("item", "").strip()
-                ):
-                    errors.append(f"{value_context}.item: required")
                 if field == "inventory_items":
-                    _validate_item_reference(
-                        session,
-                        value.get("item"),
-                        value.get("item_level"),
-                        value.get("external_item_id"),
-                        errors,
-                        value_context,
+                    has_resource = isinstance(value.get("loot_type"), str)
+                    has_category = (
+                        value.get("slot") in GearSlotCode.__members__
+                        and value.get("classification") in CURRENT_CLASSIFICATIONS
                     )
+                    if has_resource == has_category:
+                        errors.append(
+                            f"{value_context}: define either loot_type or slot/classification"
+                        )
                 if (
                     field == "books"
                     and static.active_raid_tier is not None
@@ -574,32 +582,6 @@ def _validate_current_state(session: Session, static: Static, source: Mapping[st
     if errors:
         raise ImportValidationError(errors)
     return prepared, CurrentStateImportCounts(*counts)
-
-
-def _validate_item_reference(
-    session: Session,
-    name: object,
-    item_level: object,
-    external_item_id: object,
-    errors: list[str],
-    context: str,
-) -> None:
-    if not isinstance(name, str) or not name.strip():
-        return
-    by_name = session.scalar(select(Item).where(func.lower(Item.name) == name.strip().lower()))
-    by_external = (
-        session.scalar(select(Item).where(Item.external_item_id == external_item_id))
-        if isinstance(external_item_id, int) and not isinstance(external_item_id, bool)
-        else None
-    )
-    mismatched_records = by_name and by_external and by_name.id != by_external.id
-    mismatched_external_name = (
-        by_name is None and by_external and by_external.name.casefold() != name.strip().casefold()
-    )
-    if mismatched_records or mismatched_external_name:
-        errors.append(f"{context}: item name and external ID conflict")
-    elif by_name and isinstance(item_level, int) and by_name.item_level not in (None, item_level):
-        errors.append(f"{context}: item level conflicts with the existing item")
 
 
 def _gear_row(session: Session, character_id: int, slot_id: int) -> CharacterGearSlot | None:
@@ -626,13 +608,11 @@ def _require_character(static: Static, character: Character) -> None:
 def _require_current_classification(value: GearClassification, slot: GearSlotCode) -> None:
     if value not in CURRENT_CLASSIFICATIONS:
         raise ValueError("Current classification must be one of the supported current values.")
-    if value is GearClassification.EX_WEAPON and slot is not GearSlotCode.WEAPON:
-        raise ValueError("EX_WEAPON is only valid for the Weapon slot.")
 
 
 def _require_applicable_slot(character: Character, slot: GearSlot) -> None:
-    if slot.code is GearSlotCode.OFFHAND and not job_uses_offhand(character.job.abbreviation):
-        raise ValueError("Offhand is N/A for non-PLD jobs.")
+    if slot.code is GearSlotCode.OFFHAND and not character.job.uses_offhand:
+        raise ValueError("Offhand is N/A for this job.")
 
 
 def _nonnegative(value: int, label: str) -> None:

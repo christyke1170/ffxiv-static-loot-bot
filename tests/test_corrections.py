@@ -136,7 +136,10 @@ def test_character_multifield_edit_preserves_row_and_relationships(session, corr
         CharacterKind.ALT,
         "WAR",
     )
-    assert edited.gear_slots[0].id == gear_id
+    assert (
+        next(row for row in edited.gear_slots if row.gear_slot.code is GearSlotCode.HEAD).id
+        == gear_id
+    )
 
 
 def test_character_edit_validation_and_atomic_rollback(session, correction_state):
@@ -273,9 +276,10 @@ def test_safe_and_unsafe_definition_reimports(session):
 
 def test_resource_correction_is_idempotent_and_audited(session, correction_state):
     static, _, character = correction_state
-    first = set_inventory(session, static, character, "Token", 2, 99)
-    second = set_inventory(session, static, character, "Token", 2, 99)
+    slot = session.scalar(select(GearSlot).where(GearSlot.code == GearSlotCode.HEAD))
+    first = set_inventory(session, static, character, slot, GearClassification.SAVAGE, 2, 99)
+    second = set_inventory(session, static, character, slot, GearClassification.SAVAGE, 2, 99)
     assert first.id == second.id
     assert session.scalar(select(func.count()).select_from(AuditLog)) == 2
     with pytest.raises(ValueError, match="negative"):
-        set_inventory(session, static, character, "Token", -1, 99)
+        set_inventory(session, static, character, slot, GearClassification.SAVAGE, -1, 99)

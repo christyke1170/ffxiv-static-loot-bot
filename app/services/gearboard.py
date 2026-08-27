@@ -8,12 +8,10 @@ from app.schemas.needs import NeedStatus, SlotNeedResult
 def classify_gear_state(result: SlotNeedResult) -> DisplayStatus:
     """Classify one displayed slot using its current gear state.
 
-    The needs engine remains authoritative for exact desired-item ownership and
-    manual completion. Every other decision is based on the persisted current
-    source classification, never its tier, level, or inferred item name.
+    The needs engine remains authoritative for category equality and manual completion.
     """
-    job = getattr(getattr(result.character, "job", None), "abbreviation", "")
-    if result.slot.code is GearSlotCode.OFFHAND and job.upper() != "PLD":
+    job = getattr(result.character, "job", None)
+    if result.slot.code is GearSlotCode.OFFHAND and job is not None and not job.uses_offhand:
         return DisplayStatus.NA
 
     # Completion is deliberately checked before looking at the current source.
@@ -27,14 +25,13 @@ def classify_gear_state(result: SlotNeedResult) -> DisplayStatus:
     desired = result.desired_classification
     current = result.current_classification
     if desired is current and desired in {
-        GearClassification.CRAFTED,
-        GearClassification.EX_WEAPON,
+        GearClassification.CRAFTED_EX,
         GearClassification.SAVAGE,
         GearClassification.TOME,
         GearClassification.AUGMENTED_TOME,
     }:
         return DisplayStatus.BIS
-    if current is GearClassification.CRAFTED or current is GearClassification.EX_WEAPON:
+    if current is GearClassification.CRAFTED_EX:
         return DisplayStatus.CRAFTED_EX
 
     if current in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}:

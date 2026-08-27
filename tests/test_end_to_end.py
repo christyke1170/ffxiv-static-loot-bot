@@ -16,6 +16,7 @@ from app.models import (
     CharacterKind,
     ClearMode,
     DistributionError,
+    GearClassification,
     InventoryItem,
     LootCategory,
     LootConfirmation,
@@ -86,7 +87,7 @@ def interaction(bot, user_id=LEADER):
 
 async def arrange_eight_player_static(bot):
     await invoke_registered(Setup(bot), "seed", interaction(bot))
-    await invoke_registered(StaticCog(bot), "create", interaction(bot), "Fictional E2E Static")
+    await invoke_registered(StaticCog(bot), "create", interaction(bot), "Fictional E2E Static", 710)
     with bot.session_factory() as session:
         static = session.scalar(select(Static))
         static_id = static.id
@@ -156,11 +157,11 @@ def _current_state():
                 "gear_slots": [
                     {
                         "slot": "WEAPON",
-                        "current_classification": "CRAFTED",
+                        "current_classification": "CRAFTED_EX",
                     },
                     {
                         "slot": "HEAD",
-                        "current_classification": "CRAFTED",
+                        "current_classification": "CRAFTED_EX",
                     },
                 ],
                 "inventory_items": [
@@ -241,6 +242,14 @@ async def test_complete_end_to_end_split_week(e2e_bot):
         direct = assignments[LootCategory.GEAR][0]
         coffer = assignments[LootCategory.COFFER][0]
         augments = assignments[LootCategory.AUGMENTATION_MATERIAL]
+        for assignment in augments:
+            row = session.scalar(
+                select(CharacterGearSlot).where(
+                    CharacterGearSlot.character_id == assignment.intended_character_id,
+                    CharacterGearSlot.gear_slot_id == assignment.intended_bis_set_item.gear_slot_id,
+                )
+            )
+            row.current_classification = GearClassification.TOME
         confirm_loot_received(session, direct.id, True, LEADER)
         confirm_loot_received(session, direct.id, True, LEADER)
         confirm_loot_received(session, coffer.id, True, LEADER)
@@ -337,6 +346,14 @@ async def test_complete_regular_week(e2e_bot):
             if planned.loot_type.category is LootCategory.COFFER:
                 confirm_coffer_redemption(session, planned.assignment.id, True, LEADER)
             elif planned.loot_type.category is LootCategory.AUGMENTATION_MATERIAL:
+                row = session.scalar(
+                    select(CharacterGearSlot).where(
+                        CharacterGearSlot.character_id == planned.assignment.intended_character_id,
+                        CharacterGearSlot.gear_slot_id
+                        == planned.assignment.intended_bis_set_item.gear_slot_id,
+                    )
+                )
+                row.current_classification = GearClassification.TOME
                 confirm_augmentation_applied(session, planned.assignment.id, True, LEADER)
         close_reclear_week(session, week.id)
         session.commit()

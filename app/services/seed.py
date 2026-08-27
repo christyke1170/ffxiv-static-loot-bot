@@ -39,6 +39,7 @@ JOBS = {
         ("PCT", "Pictomancer"),
     ],
 }
+OFFHAND_CAPABILITY = {"PLD": True}
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,13 +59,23 @@ def seed_reference_data(session: Session) -> SeedResult:
             session.add(GearSlot(code=code, display_name=display_name, sort_order=position))
             inserted_slots += 1
 
-    job_codes = set(session.scalars(select(Job.abbreviation)))
+    existing_jobs = {job.abbreviation: job for job in session.scalars(select(Job))}
     inserted_jobs = 0
     for role, jobs in JOBS.items():
         for abbreviation, name in jobs:
-            if abbreviation not in job_codes:
-                session.add(Job(abbreviation=abbreviation, name=name, role=role))
+            uses_offhand = OFFHAND_CAPABILITY.get(abbreviation, False)
+            if abbreviation not in existing_jobs:
+                session.add(
+                    Job(
+                        abbreviation=abbreviation,
+                        name=name,
+                        role=role,
+                        uses_offhand=uses_offhand,
+                    )
+                )
                 inserted_jobs += 1
+            else:
+                existing_jobs[abbreviation].uses_offhand = uses_offhand
     session.flush()
     return SeedResult(
         inserted_slots,

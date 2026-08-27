@@ -15,6 +15,7 @@ from app.models import (
     CharacterKind,
     ClearMode,
     FloorLootRule,
+    GearSlot,
     LootAssignment,
     LootAssignmentState,
     LootPlan,
@@ -364,7 +365,12 @@ def _populate_plan(session, plan, proposal, tier_id):
                 loot_type=loot_type,
                 intended_character_id=(row.recipient.character_id if row.recipient else None),
                 intended_bis_set_item_id=getattr(row, "intended_bis_set_item_id", None),
-                intended_final_item_id=getattr(row, "intended_final_item_id", None),
+                gear_slot_id=(
+                    session.scalar(select(GearSlot.id).where(GearSlot.code == row.gear_slot))
+                    if getattr(row, "gear_slot", None) is not None
+                    else None
+                ),
+                resulting_classification=getattr(row, "resulting_classification", None),
                 recipient_designation=row.recipient_designation,
                 expected_drop_instance=1,
                 disposition=row.disposition,

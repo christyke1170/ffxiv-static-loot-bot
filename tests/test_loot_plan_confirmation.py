@@ -61,7 +61,6 @@ def test_regular_persisted_plan_applies_exact_gear_materials_books_and_is_idempo
         bis_set=bis,
         gear_slot=head,
         classification=GearClassification.SAVAGE,
-        desired_item=item,
         raid_floor=floors[0],
     )
     members = [
@@ -114,7 +113,8 @@ def test_regular_persisted_plan_applies_exact_gear_materials_books_and_is_idempo
         loot_type=weapon,
         intended_character=main,
         intended_bis_set_item=requirement,
-        intended_final_item=item,
+        gear_slot=head,
+        resulting_classification=GearClassification.SAVAGE,
         expected_drop_instance=1,
         disposition=PlannedLootDisposition.ASSIGNED,
         recipient_designation=CharacterKind.MAIN,

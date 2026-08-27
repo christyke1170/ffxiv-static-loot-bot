@@ -140,9 +140,8 @@ async def test_demo_creates_complete_selected_isolated_state(bot, interaction_fa
                 for item in selection.bis_set.items
                 if item.gear_slot.code is GearSlotCode.OFFHAND
             )
-            if selection.character.job.abbreviation == "PLD":
+            if selection.character.job.uses_offhand:
                 assert offhand.classification is not GearClassification.NOT_APPLICABLE
-                assert offhand.desired_item is not None
             else:
                 assert offhand.classification is GearClassification.NOT_APPLICABLE
         assert build_static_gear_board(session, static.id).players
@@ -155,7 +154,6 @@ async def test_demo_creates_complete_selected_isolated_state(bot, interaction_fa
         assert {
             NeedStatus.COMPLETE,
             NeedStatus.NEEDS_SAVAGE_DROP,
-            NeedStatus.NEEDS_BASE_TOME_ITEM,
             NeedStatus.NEEDS_AUGMENTATION,
             NeedStatus.READY_TO_AUGMENT,
             NeedStatus.OWNED_COFFER_AVAILABLE,
@@ -190,13 +188,13 @@ async def test_standard_demo_has_representative_current_state_without_unknowns(
             row
             for character in _active_characters(static)
             for row in character.gear_slots
-            if row.gear_slot.code is not GearSlotCode.OFFHAND or character.job.abbreviation == "PLD"
+            if row.gear_slot.code is not GearSlotCode.OFFHAND or character.job.uses_offhand
         ]
         assert all(
             row.current_classification
             in {
-                GearClassification.CRAFTED,
-                GearClassification.EX_WEAPON,
+                GearClassification.CRAFTED_EX,
+                GearClassification.CRAFTED_EX,
                 GearClassification.SAVAGE,
                 GearClassification.TOME,
                 GearClassification.AUGMENTED_TOME,
@@ -215,10 +213,11 @@ async def test_demo_offhand_current_state_matches_job_applicability(bot, interac
             offhands = [
                 row for row in character.gear_slots if row.gear_slot.code is GearSlotCode.OFFHAND
             ]
-            if character.job.abbreviation == "PLD":
+            if character.job.uses_offhand:
                 assert len(offhands) == 1
             else:
-                assert offhands == []
+                assert len(offhands) == 1
+                assert offhands[0].current_classification is GearClassification.NOT_APPLICABLE
 
 
 async def test_demo_is_atomic_and_repeated_creation_cannot_duplicate(
@@ -281,8 +280,7 @@ async def test_demo_refresh_repairs_pre_fix_pld_and_is_idempotent(bot, interacti
         offhand = next(
             row for row in selection.bis_set.items if row.gear_slot.code is GearSlotCode.OFFHAND
         )
-        offhand.classification = GearClassification.CRAFTED
-        offhand.desired_item.name = "Fictional Demo G100 PLD Fictional Crafted Shield"
+        offhand.classification = GearClassification.CRAFTED_EX
         offhand.raid_floor = None
         offhand.loot_type = None
         offhand.book_cost = None
@@ -307,7 +305,7 @@ async def test_demo_refresh_repairs_pre_fix_pld_and_is_idempotent(bot, interacti
             ).total_applicable_slot_count
             == 11
             for row in characters
-            if row.job.abbreviation != "PLD"
+            if not row.job.uses_offhand
         )
         selection = next(
             row for row in pld.bis_selections if row.raid_tier_id == static.active_raid_tier_id
@@ -315,7 +313,7 @@ async def test_demo_refresh_repairs_pre_fix_pld_and_is_idempotent(bot, interacti
         offhand = next(
             row for row in selection.bis_set.items if row.gear_slot.code is GearSlotCode.OFFHAND
         )
-        assert offhand.desired_item.name == "Fictional Demo G100 PLD Savage Shield"
+        assert offhand.classification is GearClassification.SAVAGE
         assert offhand.loot_type.code == "WEAPON_COFFER" and offhand.raid_floor.floor_number == 4
         assert any(row.gear_slot.code is GearSlotCode.OFFHAND for row in pld.gear_slots)
     assert "updated" in refreshed.messages[0]["content"]

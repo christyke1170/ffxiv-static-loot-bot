@@ -58,7 +58,6 @@ from app.models.enums import (
     PlannedLootDisposition,
     ReclearWorkflowState,
     WeeklyLootPlanStatus,
-    job_uses_offhand,
 )
 
 __all__ = [
@@ -117,5 +116,4 @@ __all__ = [
     "WeeklyHierarchySnapshotEntry",
     "WeeklyLockout",
     "WeeklyLootPlanStatus",
-    "job_uses_offhand",
 ]

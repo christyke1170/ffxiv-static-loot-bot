@@ -7,7 +7,6 @@ from app.models import (
     BisSetItem,
     Character,
     GearSlot,
-    Item,
     LootAssignment,
     LootAssignmentState,
     LootPlan,
@@ -73,7 +72,6 @@ class RankedEligibleRecipient:
     confirmed_priority_receipts: int
     intended_bis_set_item: BisSetItem | None
     intended_slot: GearSlot | None
-    intended_final_item: Item | None
     owns_required_base_tome_item: bool | None
     reason: str
 
@@ -89,7 +87,6 @@ class PlannedDropResult:
     suggested_recipient: Character | None
     intended_recipient: Character | None
     intended_bis_slot: GearSlot | None
-    intended_final_item: Item | None
     backup_recipient: Character | None
     state: LootAssignmentState
     reason: str

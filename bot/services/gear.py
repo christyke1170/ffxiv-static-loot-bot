@@ -9,7 +9,6 @@ from app.models import (
     CharacterKind,
     GearClassification,
     GearSlot,
-    GearSlotCode,
     RaidFloor,
     Static,
     StaticMember,
@@ -83,12 +82,6 @@ def classification(value: str, target_slot: GearSlot | None = None) -> GearClass
         raise ValueError(f"Unknown current classification: {value}.") from exc
     if result not in CURRENT_CLASSIFICATIONS:
         raise ValueError("NOT_APPLICABLE is only valid for desired BiS configuration.")
-    if (
-        result is GearClassification.EX_WEAPON
-        and target_slot is not None
-        and target_slot.code is not GearSlotCode.WEAPON
-    ):
-        raise ValueError("EX_WEAPON is only valid for the Weapon slot.")
     return result
 
 

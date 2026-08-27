@@ -19,7 +19,6 @@ from app.models import (
     GearClassification,
     GearSlot,
     GearSlotCode,
-    Item,
     Job,
     RaidFloor,
     RaidTier,
@@ -75,13 +74,8 @@ def full_board(session):
         gear_set_url="https://example.invalid/board",
     )
     for slot in slots:
-        desired = Item(name=f"Desired {slot.code.value}", item_level=730)
-        desired_by_slot[slot.code] = desired
-        bis_set.items.append(
-            BisSetItem(
-                gear_slot=slot, classification=GearClassification.SAVAGE, desired_item=desired
-            )
-        )
+        desired_by_slot[slot.code] = slot.code.value
+        bis_set.items.append(BisSetItem(gear_slot=slot, classification=GearClassification.SAVAGE))
     session.add_all([static, bis_set])
     for index in range(8):
         member = StaticMember(
@@ -138,10 +132,10 @@ def test_board_contains_eight_mains_and_excludes_alts(full_board):
     assert all(player.character_name.startswith("Main") for player in board.players)
 
 
-def test_board_desired_item_and_current_classification_are_distinct(full_board):
+def test_board_desired_and_current_categories_are_distinct(full_board):
     board, _ = full_board
     first, second = board.players[:2]
-    assert first.slots[0].desired_item is not None
+    assert first.slots[0].desired_classification is GearClassification.SAVAGE
     assert first.slots[0].current_classification is GearClassification.SAVAGE
     assert second.slots[0].current_classification is None
 
@@ -154,7 +148,7 @@ def test_board_ring_slots_are_distinct(full_board):
         if slot.code in {GearSlotCode.RING_1, GearSlotCode.RING_2}
     ]
     assert [slot.code for slot in rings] == [GearSlotCode.RING_1, GearSlotCode.RING_2]
-    assert rings[0].desired_item != rings[1].desired_item
+    assert rings[0].code is not rings[1].code
 
 
 def test_missing_bis_selection_warning(full_board, session):
@@ -178,15 +172,19 @@ def need_result(
     *,
     current_level=None,
     desired_level=None,
-    current_classification=GearClassification.CRAFTED,
+    current_classification=GearClassification.CRAFTED_EX,
     job="PLD",
     slot_code=GearSlotCode.HEAD,
 ):
     character = Character(name="Test", world="World", kind=CharacterKind.MAIN)
-    character.job = Job(abbreviation=job, name=job, role="Test")
+    character.job = Job(
+        abbreviation=job,
+        name=job,
+        role="Test",
+        uses_offhand=job == "PLD",
+    )
     bis_set = BisSet(name="Set")
     slot = GearSlot(code=slot_code, display_name=slot_code.title(), sort_order=1)
-    desired = Item(name="Desired", item_level=desired_level) if desired_level is not None else None
     if current_level is not None:
         character.gear_slots.append(
             CharacterGearSlot(
@@ -198,8 +196,7 @@ def need_result(
         character,
         bis_set,
         slot,
-        GearClassification.OTHER,
-        desired,
+        GearClassification.GARBAGE,
         current_classification,
         status,
     )
@@ -208,75 +205,75 @@ def need_result(
 @pytest.mark.parametrize(
     ("status", "current", "desired", "classification", "expected"),
     [
-        (NeedStatus.COMPLETE, None, None, GearClassification.OTHER, DisplayStatus.BIS),
+        (NeedStatus.COMPLETE, None, None, GearClassification.GARBAGE, DisplayStatus.BIS),
         (
             NeedStatus.MANUALLY_COMPLETE,
             None,
             None,
-            GearClassification.OTHER,
+            GearClassification.GARBAGE,
             DisplayStatus.BIS,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             700,
             730,
             GearClassification.SAVAGE,
             DisplayStatus.ALTERNATE,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             700,
             730,
             GearClassification.AUGMENTED_TOME,
             DisplayStatus.ALTERNATE,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             700,
             730,
             GearClassification.TOME,
             DisplayStatus.TOME_NEEDS_AUGMENT,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             700,
             730,
-            GearClassification.CRAFTED,
+            GearClassification.CRAFTED_EX,
             DisplayStatus.CRAFTED_EX,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             700,
             730,
-            GearClassification.EX_WEAPON,
+            GearClassification.CRAFTED_EX,
             DisplayStatus.CRAFTED_EX,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             700,
             730,
             GearClassification.SAVAGE,
             DisplayStatus.ALTERNATE,
         ),
         (
-            NeedStatus.NEEDS_EXACT_ITEM,
+            NeedStatus.NEEDS_CATEGORY,
             None,
             730,
-            GearClassification.OTHER,
+            GearClassification.GARBAGE,
             DisplayStatus.NEEDS_REPLACEMENT,
         ),
         (
             NeedStatus.INVALID_CONFIGURATION,
             None,
             None,
-            GearClassification.OTHER,
+            GearClassification.GARBAGE,
             DisplayStatus.NEEDS_REPLACEMENT,
         ),
         (
             NeedStatus.NOT_APPLICABLE,
             None,
             None,
-            GearClassification.OTHER,
+            GearClassification.GARBAGE,
             DisplayStatus.NEEDS_REPLACEMENT,
         ),
     ],
@@ -299,7 +296,7 @@ def test_non_pld_offhand_is_always_na():
     result = need_result(
         NeedStatus.INVALID_CONFIGURATION,
         current_level=1,
-        current_classification=GearClassification.OTHER,
+        current_classification=GearClassification.GARBAGE,
         job="WAR",
         slot_code=GearSlotCode.OFFHAND,
     )
@@ -309,17 +306,16 @@ def test_non_pld_offhand_is_always_na():
 @pytest.mark.parametrize(
     ("desired_classification", "current_classification"),
     [
-        (GearClassification.SAVAGE, GearClassification.CRAFTED),
-        (GearClassification.AUGMENTED_TOME, GearClassification.CRAFTED),
-        (GearClassification.TOME, GearClassification.CRAFTED),
-        (GearClassification.EX_WEAPON, GearClassification.CRAFTED),
+        (GearClassification.SAVAGE, GearClassification.CRAFTED_EX),
+        (GearClassification.AUGMENTED_TOME, GearClassification.CRAFTED_EX),
+        (GearClassification.TOME, GearClassification.CRAFTED_EX),
     ],
 )
 def test_crafted_current_gear_is_yellow_independent_of_desired_classification(
     desired_classification, current_classification
 ):
     result = need_result(
-        NeedStatus.NEEDS_EXACT_ITEM,
+        NeedStatus.NEEDS_CATEGORY,
         current_level=710,
         desired_level=730,
         current_classification=current_classification,
@@ -356,14 +352,13 @@ def test_exact_base_tome_for_augmented_desired_item_needs_augment():
         current_classification=GearClassification.TOME,
     )
     result.desired_classification = GearClassification.AUGMENTED_TOME
-    result.required_base_tome_item = Item(name="Base Tome", item_level=710)
     assert classify_gear_state(result) is DisplayStatus.TOME_NEEDS_AUGMENT
 
 
 @pytest.mark.parametrize("current_level", [1, 710, 999999])
 def test_arbitrary_item_levels_do_not_change_source_status(current_level):
     result = need_result(
-        NeedStatus.NEEDS_EXACT_ITEM,
+        NeedStatus.NEEDS_CATEGORY,
         current_level=current_level,
         desired_level=730,
         current_classification=GearClassification.SAVAGE,
@@ -373,21 +368,21 @@ def test_arbitrary_item_levels_do_not_change_source_status(current_level):
 
 def test_matching_classification_is_bis_even_with_stale_needs_status():
     result = need_result(
-        NeedStatus.NEEDS_EXACT_ITEM,
+        NeedStatus.NEEDS_CATEGORY,
         current_level=710,
         desired_level=730,
-        current_classification=GearClassification.CRAFTED,
+        current_classification=GearClassification.CRAFTED_EX,
     )
-    result.desired_classification = GearClassification.CRAFTED
+    result.desired_classification = GearClassification.CRAFTED_EX
     assert classify_gear_state(result) is DisplayStatus.BIS
 
 
 def test_different_crafted_item_against_non_crafted_bis_is_yellow():
     result = need_result(
-        NeedStatus.NEEDS_EXACT_ITEM,
+        NeedStatus.NEEDS_CATEGORY,
         current_level=710,
         desired_level=730,
-        current_classification=GearClassification.CRAFTED,
+        current_classification=GearClassification.CRAFTED_EX,
     )
     result.desired_classification = GearClassification.SAVAGE
     assert classify_gear_state(result) is DisplayStatus.CRAFTED_EX
@@ -395,7 +390,7 @@ def test_different_crafted_item_against_non_crafted_bis_is_yellow():
 
 def test_garbage_current_gear_is_red():
     result = need_result(
-        NeedStatus.NEEDS_EXACT_ITEM,
+        NeedStatus.NEEDS_CATEGORY,
         current_level=1,
         desired_level=730,
         current_classification=GearClassification.GARBAGE,
@@ -590,7 +585,7 @@ def test_detailed_player_and_summary_tables(full_board):
     assert "Augmentation Needed" in summary
     assert "Books Per Player" in summary
     assert "🟩" not in summary
-    assert classification_label(GearClassification.EX_WEAPON) == "EX weapon"
+    assert classification_label(GearClassification.CRAFTED_EX) == "Crafted / EX"
     assert material_label("ACCESSORY_GLAZE") == "Glaze"
     assert material_label("ARMOR_TWINE") == "Twine"
     assert loot_type_label("HEAD_COFFER") == "Heads"
@@ -601,9 +596,7 @@ def test_selected_player_detail_shows_effective_books_only(full_board):
     board, _ = full_board
     view = GearBoardView(SimpleNamespace(), board, mode=f"player:{board.players[0].character_id}")
     text = "\n".join(
-        item.content
-        for item in view.walk_children()
-        if isinstance(item, discord.ui.TextDisplay)
+        item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay)
     )
     assert "**Books**" in text
     assert "Floor 1 Books: 1" in text
@@ -625,9 +618,7 @@ def test_selected_player_detail_shows_effective_books_only(full_board):
         if isinstance(item, discord.ui.TextDisplay)
     )
     summary_text = "\n".join(
-        item.content
-        for item in summary.walk_children()
-        if isinstance(item, discord.ui.TextDisplay)
+        item.content for item in summary.walk_children() if isinstance(item, discord.ui.TextDisplay)
     )
     assert "Floor 1 Books:" not in overview_text
     assert "Books Per Player" in summary_text

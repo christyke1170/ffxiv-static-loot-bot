@@ -207,26 +207,28 @@ not implemented.
 
 Every `/gearboard` overview slot and selected-player detail uses exactly the same legend:
 `🟩 BiS`, `🟦 Alternate`, `🟧 Tome needs augment`, `🟨 Crafted / EX`, `⬛ N/A`, and
-`🟥 Needs replacement`. Current equipped gear is classification-only and stores exactly one of
-`CRAFTED`, `EX_WEAPON`, `SAVAGE`, `TOME`, `AUGMENTED_TOME`, or `GARBAGE`; it never stores an item
-name, external item ID, item level, note, or current raid tier. A same-slot desired/current
-classification match is BiS for the first five states. Manual completion and an exact desired item
-owned in inventory also complete a slot. Otherwise Savage and augmented Tome are Alternate, Tome
-needs augment, Crafted or EX is Crafted / EX, and Garbage, missing, unknown, or invalid gear needs
-replacement. Non-PLD Offhand is N/A. Starting a new raid tier uses a reset/new working static state
-rather than comparing historical current gear by item level.
+`🟥 Needs replacement`. Current gear and BiS requirements store only slot categories:
+`CRAFTED_EX`, `SAVAGE`, `TOME`, `AUGMENTED_TOME`, `GARBAGE`, or `NOT_APPLICABLE`. A slot is complete
+only through exact category equality, Not Applicable, or a manual override. No specific equipment
+identity or per-piece item level is tracked. Offhand applicability comes from `Job.uses_offhand`.
+New characters begin with Crafted/EX in every applicable slot.
 
 `/gear set display_name main_or_alt` is an admin-only ephemeral editor. It resolves the member in the
 invoking admin's selected static, selects that member's Main or Alt character, and displays all slots
 in authoritative order with their current classifications, then lets an authorized static administrator choose a slot
 and save one of the six classifications immediately without opening another message. The editor
 supports repeated changes, reset, and Close; every callback revalidates the shared raid-leader/admin
-policy and is restricted to the administrator who opened it. EX is Weapon-only, non-PLD Offhand is
-visible as N/A and cannot be edited, and PLD Offhand is editable but still rejects EX.
+policy and is restricted to the administrator who opened it. A configured non-offhand job shows Offhand
+as N/A and cannot edit it; a configured offhand-capable job can edit it normally.
 
-FFXIV's separate-offhand rule is validated in BiS definitions: PLD must define an
-applicable Offhand item, while every other supported combat job must set Offhand to
-`NOT_APPLICABLE`.
+Offhand configuration is validated in BiS definitions: offhand-capable jobs require an applicable
+Offhand category and other jobs require `NOT_APPLICABLE`.
+
+Each static configures a relative Crafted/EX baseline with `/static item-level`. Tome is baseline +10,
+Augmented Tome and Savage armor/accessories are +20, and Savage Weapon/applicable Offhand is +25.
+Average item level always uses eleven contributions; an applicable Weapon/Offhand pair is averaged into
+one weapon contribution. Garbage or missing applicable gear makes the average unavailable. Item level
+is informational and never completes BiS.
 
 ### Gear-board Summary and weekly books
 

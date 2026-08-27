@@ -32,7 +32,6 @@ from app.models import (
     ReclearWeek,
     Static,
     WeeklyLockout,
-    job_uses_offhand,
 )
 
 JsonSource = Mapping[str, Any] | str | Path
@@ -240,12 +239,9 @@ def import_bis_sets(session: Session, source: JsonSource, *, dry_run: bool = Fal
                     f"{item_context}.classification: unknown classification {classification}"
                 )
                 continue
-            desired = item.get("desired_item")
             references = (
-                desired,
                 item.get("floor"),
                 item.get("loot_type"),
-                item.get("base_tome_item"),
                 item.get("tome_cost"),
                 item.get("augmentation_material"),
                 item.get("book_cost"),
@@ -257,11 +253,11 @@ def import_bis_sets(session: Session, source: JsonSource, *, dry_run: bool = Fal
                     f"{item_context}.classification: contradictory NOT_APPLICABLE requirement"
                 )
             if slot == "OFFHAND" and job is not None:
-                uses_offhand = job_uses_offhand(job.abbreviation)
+                uses_offhand = job.uses_offhand
                 if uses_offhand and classification == "NOT_APPLICABLE":
                     errors.append(
-                        f"{item_context}.classification: PLD OFFHAND must define an applicable "
-                        "item requirement"
+                        f"{item_context}.classification: {job.abbreviation} OFFHAND must define "
+                        "an applicable category"
                     )
                 elif not uses_offhand and classification != "NOT_APPLICABLE":
                     errors.append(
@@ -272,14 +268,9 @@ def import_bis_sets(session: Session, source: JsonSource, *, dry_run: bool = Fal
                 value = item.get(field)
                 if value is not None and (not isinstance(value, int) or value < 0):
                     errors.append(f"{item_context}.{field}: must be nonnegative")
-            if classification == "AUGMENTED_TOME" and (
-                not desired
-                or not item.get("base_tome_item")
-                or not item.get("augmentation_material")
-            ):
+            if classification == "AUGMENTED_TOME" and not item.get("augmentation_material"):
                 errors.append(
-                    f"{item_context}.classification: AUGMENTED_TOME requires desired_item, "
-                    "base_tome_item, and augmentation_material"
+                    f"{item_context}.classification: AUGMENTED_TOME requires augmentation_material"
                 )
             if tier is not None:
                 if item.get("floor") is not None and not any(
@@ -338,13 +329,10 @@ def import_bis_sets(session: Session, source: JsonSource, *, dry_run: bool = Fal
             bis_set.active = row.get("active", True)
             for item_data in row.get("items", []):
                 classification = GearClassification[item_data["classification"]]
-                desired = _item(session, item_data.get("desired_item"))
-                base = _item(session, item_data.get("base_tome_item"))
                 bis_set.items.append(
                     BisSetItem(
                         gear_slot=slots[item_data["slot"]],
                         classification=classification,
-                        desired_item=desired,
                         raid_floor=next(
                             (
                                 floor
@@ -361,7 +349,6 @@ def import_bis_sets(session: Session, source: JsonSource, *, dry_run: bool = Fal
                             ),
                             None,
                         ),
-                        base_tome_item=base,
                         tome_cost=item_data.get("tome_cost"),
                         augmentation_material_type=next(
                             (
@@ -484,10 +471,8 @@ def _bis_matches(bis_set: BisSet, data: Mapping[str, Any]) -> bool:
         return (
             row.gear_slot.code.value,
             row.classification.value,
-            row.desired_item.name if row.desired_item else None,
             row.raid_floor.floor_number if row.raid_floor else None,
             row.loot_type.code if row.loot_type else None,
-            row.base_tome_item.name if row.base_tome_item else None,
             row.tome_cost,
             row.augmentation_material_type.code if row.augmentation_material_type else None,
             row.book_cost,
@@ -498,10 +483,8 @@ def _bis_matches(bis_set: BisSet, data: Mapping[str, Any]) -> bool:
         return (
             row["slot"],
             row["classification"],
-            row.get("desired_item"),
             row.get("floor"),
             row.get("loot_type"),
-            row.get("base_tome_item"),
             row.get("tome_cost"),
             row.get("augmentation_material"),
             row.get("book_cost"),

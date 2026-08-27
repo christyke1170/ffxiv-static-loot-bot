@@ -3,7 +3,13 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from app.models import CharacterKind, ClearMode, PlannedLootDisposition
+from app.models import (
+    CharacterKind,
+    ClearMode,
+    GearClassification,
+    GearSlotCode,
+    PlannedLootDisposition,
+)
 
 
 class LootPlanningIssueSeverity(StrEnum):
@@ -95,7 +101,8 @@ class RegularLootAssignment:
     explanation: str
     fairness: MaterialFairnessContext | None = None
     intended_bis_set_item_id: int | None = None
-    intended_final_item_id: int | None = None
+    gear_slot: GearSlotCode | None = None
+    resulting_classification: GearClassification | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +224,8 @@ class SplitSavageAssignment:
     recipient_designation: CharacterKind | None
     explanation: str
     intended_bis_set_item_id: int | None = None
-    intended_final_item_id: int | None = None
+    gear_slot: GearSlotCode | None = None
+    resulting_classification: GearClassification | None = None
 
 
 @dataclass(frozen=True, slots=True)

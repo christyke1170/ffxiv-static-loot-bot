@@ -170,7 +170,6 @@ def _coffer_assignment(session):
         bis_set=bis_set,
         gear_slot=current.gear_slot,
         classification="SAVAGE",
-        desired_item=assignment.intended_final_item,
         raid_floor=assignment.raid_floor,
         loot_type=assignment.loot_type,
     )
@@ -185,7 +184,7 @@ def test_coffer_receipt_redemption_and_correction(session) -> None:
     inventory = session.scalar(
         select(InventoryItem).where(
             InventoryItem.character_id == assignment.intended_character_id,
-            InventoryItem.item_id == assignment.loot_type.item_id,
+            InventoryItem.loot_type_id == assignment.loot_type_id,
         )
     )
     assert inventory.quantity == 1
@@ -236,12 +235,11 @@ def test_augmentation_receipt_and_application_consumes_one_material(session) -> 
         category=LootCategory.AUGMENTATION_MATERIAL,
         item=material_item,
     )
-    base = Item(name="Base Tome")
     assignment.loot_type = material_loot
     assignment.intended_bis_set_item.classification = "AUGMENTED_TOME"
-    assignment.intended_bis_set_item.base_tome_item = base
     assignment.intended_bis_set_item.augmentation_material_type = material
-    session.add(InventoryItem(character_id=assignment.intended_character_id, item=base, quantity=1))
+    assignment.resulting_classification = GearClassification.AUGMENTED_TOME
+    current.current_classification = GearClassification.TOME
     session.commit()
     confirm_loot_received(session, assignment.id, True, 10)
     owned = session.scalar(select(CharacterAugmentationInventory))
@@ -268,7 +266,6 @@ def test_pld_weapon_bundle_redemption_consumes_one_coffer_and_equips_both(sessio
                 BisSetItem(
                     gear_slot=slot,
                     classification=GearClassification.SAVAGE,
-                    desired_item=desired[code],
                     raid_floor=fixture.floor,
                     loot_type=fixture.coffer,
                 )
@@ -289,7 +286,7 @@ def test_pld_weapon_bundle_redemption_consumes_one_coffer_and_equips_both(sessio
     coffer = session.scalar(
         select(InventoryItem).where(
             InventoryItem.character_id == pld.id,
-            InventoryItem.item_id == fixture.coffer_item.id,
+            InventoryItem.loot_type_id == fixture.coffer.id,
         )
     )
     assert coffer.quantity == 1

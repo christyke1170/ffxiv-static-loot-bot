@@ -409,9 +409,10 @@ def _score_split_candidate(
                     _planned_bis_item_id(
                         needs[participant.character_id], floor, drop.loot_type_code
                     ),
-                    _planned_bis_item_final_id(
+                    _planned_bis_item_slot(
                         needs[participant.character_id], floor, drop.loot_type_code
                     ),
+                    GearClassification.SAVAGE,
                 )
             )
             if designation is CharacterKind.MAIN:
@@ -1205,9 +1206,8 @@ def _assign_drop(
         CharacterKind.MAIN,
         f"{winner.name} is the highest-priority participating Main who still needs this drop.",
         intended_bis_set_item_id=_planned_bis_item_id(needs[winner.id], floor, drop.loot_type_code),
-        intended_final_item_id=_planned_bis_item_final_id(
-            needs[winner.id], floor, drop.loot_type_code
-        ),
+        gear_slot=_planned_bis_item_slot(needs[winner.id], floor, drop.loot_type_code),
+        resulting_classification=GearClassification.SAVAGE,
     )
 
 
@@ -1216,9 +1216,9 @@ def _planned_bis_item_id(result, floor, loot_type_code):
     return item.id if item is not None else None
 
 
-def _planned_bis_item_final_id(result, floor, loot_type_code):
+def _planned_bis_item_slot(result, floor, loot_type_code):
     item = _planned_bis_item_row(result, floor, loot_type_code)
-    return item.desired_item_id if item is not None else None
+    return item.gear_slot.code if item is not None else None
 
 
 def _planned_bis_item_row(result, floor, loot_type_code):

@@ -145,7 +145,16 @@ def test_every_write_command_has_effective_permission_check(bot):
 def test_every_advertised_callback_is_implemented_and_callable(bot):
     expected = {
         Setup: {"status", "seed", "demo", "demo-refresh"},
-        StaticCog: {"create", "edit", "deactivate", "reactivate", "list", "show", "select"},
+        StaticCog: {
+            "create",
+            "edit",
+            "deactivate",
+            "reactivate",
+            "list",
+            "show",
+            "select",
+            "item-level",
+        },
         Member: {"add", "edit", "list", "deactivate", "reactivate"},
         Character: {"add", "edit", "deactivate", "reactivate", "list"},
         Tier: {"import", "select", "clear", "show"},

@@ -98,10 +98,8 @@ class NeedsFixture:
             bis_set=self.bis_set,
             gear_slot=self.slots[slot],
             classification=classification,
-            desired_item=desired,
             raid_floor=floor,
             loot_type=loot_type,
-            base_tome_item=base,
             augmentation_material_type=material,
             book_cost=book_cost,
         )
@@ -152,7 +150,18 @@ def add_equipped(
 
 
 def add_inventory(needs: NeedsFixture, item: Item, quantity: int = 1) -> None:
-    needs.session.add(InventoryItem(character=needs.character, item=item, quantity=quantity))
+    if item is needs.coffer_item:
+        needs.session.add(
+            InventoryItem(character=needs.character, loot_type=needs.coffer, quantity=quantity)
+        )
+        return
+    requirement = next(
+        row
+        for row in needs.requirements.values()
+        if row.classification is GearClassification.AUGMENTED_TOME
+        and not any(gear.gear_slot is row.gear_slot for gear in needs.character.gear_slots)
+    )
+    add_equipped(needs, requirement.gear_slot.code, GearClassification.TOME)
 
 
 def test_no_selected_bis_set_returns_warning(needs: NeedsFixture) -> None:
@@ -164,31 +173,48 @@ def test_no_selected_bis_set_returns_warning(needs: NeedsFixture) -> None:
     assert not result.is_full_bis
 
 
-def test_exact_desired_item_owned_in_inventory_is_complete(needs: NeedsFixture) -> None:
-    desired = Item(name="Fictional Exact Hat inventory", item_level=730)
-    needs.requirement(GearSlotCode.HEAD, GearClassification.OTHER, desired=desired)
-    add_inventory(needs, desired)
+def test_unequipped_category_inventory_does_not_complete(needs: NeedsFixture) -> None:
+    needs.requirement(
+        GearSlotCode.HEAD,
+        GearClassification.SAVAGE,
+        floor=needs.floor_one,
+        loot_type=needs.coffer,
+    )
+    needs.session.add(
+        InventoryItem(
+            character=needs.character,
+            gear_slot=needs.slots[GearSlotCode.HEAD],
+            classification=GearClassification.SAVAGE,
+            quantity=1,
+        )
+    )
     needs.finish()
 
     row = slot_result(needs.result(), GearSlotCode.HEAD)
-    assert row.status is NeedStatus.COMPLETE
-    assert "exact desired final item" in row.explanation
+    assert row.status is NeedStatus.NEEDS_SAVAGE_DROP
+    assert not row.is_complete
 
 
-def test_high_item_level_non_bis_item_remains_incomplete(needs: NeedsFixture) -> None:
-    desired = Item(name="Fictional Desired Hat", item_level=700)
-    needs.requirement(GearSlotCode.HEAD, GearClassification.OTHER, desired=desired)
+def test_nonmatching_category_remains_incomplete(needs: NeedsFixture) -> None:
+    desired = Item(name="Unused Fictional Resource Name")
+    needs.requirement(
+        GearSlotCode.HEAD,
+        GearClassification.SAVAGE,
+        desired=desired,
+        floor=needs.floor_one,
+        loot_type=needs.coffer,
+    )
     add_equipped(needs, GearSlotCode.HEAD)
     needs.finish()
 
     row = slot_result(needs.result(), GearSlotCode.HEAD)
-    assert row.status is NeedStatus.NEEDS_EXACT_ITEM
+    assert row.status is NeedStatus.NEEDS_SAVAGE_DROP
     assert row.current_classification is GearClassification.GARBAGE
 
 
 def test_manual_completion_override(needs: NeedsFixture) -> None:
     desired = Item(name="Fictional Manual Desired Hat")
-    needs.requirement(GearSlotCode.HEAD, GearClassification.OTHER, desired=desired)
+    needs.requirement(GearSlotCode.HEAD, GearClassification.GARBAGE, desired=desired)
     add_equipped(needs, GearSlotCode.HEAD, manual=True)
     needs.finish()
     assert slot_result(needs.result(), GearSlotCode.HEAD).status is NeedStatus.MANUALLY_COMPLETE
@@ -410,8 +436,8 @@ def test_savage_primary_need_remains_with_book_alternative(needs: NeedsFixture) 
 
 def test_full_bis_detection(needs: NeedsFixture) -> None:
     desired = Item(name="Fictional Full BiS Hat")
-    needs.requirement(GearSlotCode.HEAD, GearClassification.CRAFTED, desired=desired)
-    add_equipped(needs, GearSlotCode.HEAD, GearClassification.CRAFTED)
+    needs.requirement(GearSlotCode.HEAD, GearClassification.CRAFTED_EX, desired=desired)
+    add_equipped(needs, GearSlotCode.HEAD, GearClassification.CRAFTED_EX)
     needs.finish()
     result = needs.result()
     assert result.is_full_bis
@@ -421,8 +447,8 @@ def test_full_bis_detection(needs: NeedsFixture) -> None:
 @pytest.mark.parametrize(
     ("classification", "slot"),
     [
-        (GearClassification.CRAFTED, GearSlotCode.LEGS),
-        (GearClassification.EX_WEAPON, GearSlotCode.WEAPON),
+        (GearClassification.CRAFTED_EX, GearSlotCode.LEGS),
+        (GearClassification.CRAFTED_EX, GearSlotCode.WEAPON),
         (GearClassification.SAVAGE, GearSlotCode.HEAD),
         (GearClassification.TOME, GearSlotCode.HANDS),
         (GearClassification.AUGMENTED_TOME, GearSlotCode.BODY),
@@ -493,7 +519,7 @@ def test_cross_tier_invalid_configuration_returns_warning(needs: NeedsFixture) -
 
 def test_missing_required_slots_returns_validation_warnings(needs: NeedsFixture) -> None:
     desired = Item(name="Only Fictional Requirement")
-    needs.requirement(GearSlotCode.HEAD, GearClassification.OTHER, desired=desired)
+    needs.requirement(GearSlotCode.HEAD, GearClassification.GARBAGE, desired=desired)
     needs.session.add(
         CharacterBisSelection(
             character=needs.character, raid_tier=needs.tier, bis_set=needs.bis_set

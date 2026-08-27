@@ -20,7 +20,6 @@ from app.models import (
     GearSlot,
     GearSlotCode,
     InventoryItem,
-    Item,
     Job,
     RaidTier,
     SplitGroup,
@@ -110,15 +109,20 @@ def test_job_can_have_multiple_bis_sets_for_same_tier(session: Session) -> None:
 def test_character_has_separate_current_gear_and_inventory(session: Session) -> None:
     character = make_character(session)
     slot = GearSlot(code=GearSlotCode.FEET, display_name="Feet", sort_order=7)
-    carried = Item(name="Spare Boots")
     character.gear_slots.append(
-        CharacterGearSlot(gear_slot=slot, current_classification=GearClassification.CRAFTED)
+        CharacterGearSlot(gear_slot=slot, current_classification=GearClassification.CRAFTED_EX)
     )
-    character.inventory_items.append(InventoryItem(item=carried, quantity=2))
+    character.inventory_items.append(
+        InventoryItem(
+            gear_slot=slot,
+            classification=GearClassification.SAVAGE,
+            quantity=2,
+        )
+    )
     session.commit()
 
-    assert character.gear_slots[0].current_classification is GearClassification.CRAFTED
-    assert character.inventory_items[0].item.name == "Spare Boots"
+    assert character.gear_slots[0].current_classification is GearClassification.CRAFTED_EX
+    assert character.inventory_items[0].classification is GearClassification.SAVAGE
     assert character.inventory_items[0].quantity == 2
 
 
@@ -130,7 +134,7 @@ def test_duplicate_bis_slots_are_rejected(session: Session) -> None:
     bis_set.items.extend(
         [
             BisSetItem(gear_slot=slot, classification=GearClassification.SAVAGE),
-            BisSetItem(gear_slot=slot, classification=GearClassification.CRAFTED),
+            BisSetItem(gear_slot=slot, classification=GearClassification.CRAFTED_EX),
         ]
     )
     session.add(bis_set)
@@ -141,7 +145,15 @@ def test_duplicate_bis_slots_are_rejected(session: Session) -> None:
 
 def test_negative_inventory_quantities_are_rejected(session: Session) -> None:
     character = make_character(session)
-    session.add(InventoryItem(character=character, item=Item(name="Invalid Item"), quantity=-1))
+    slot = GearSlot(code=GearSlotCode.FEET, display_name="Feet", sort_order=7)
+    session.add(
+        InventoryItem(
+            character=character,
+            gear_slot=slot,
+            classification=GearClassification.SAVAGE,
+            quantity=-1,
+        )
+    )
 
     with pytest.raises(IntegrityError):
         session.commit()

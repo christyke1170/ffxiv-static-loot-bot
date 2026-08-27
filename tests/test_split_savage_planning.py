@@ -153,8 +153,6 @@ def test_alt_receives_only_when_no_main_needs_the_coffer(session):
     main = fixture.mains[0]
     requirement = fixture.requirement(main, GearSlotCode.HEAD)
     requirement.classification = GearClassification.NOT_APPLICABLE
-    requirement.desired_item = None
-    requirement.desired_item_id = None
     requirement.raid_floor = None
     requirement.raid_floor_id = None
     requirement.loot_type = None
@@ -180,9 +178,6 @@ def test_alt_receives_only_when_no_main_needs_the_coffer(session):
                     GearClassification.SAVAGE
                     if source.gear_slot.code is GearSlotCode.HEAD
                     else GearClassification.NOT_APPLICABLE
-                ),
-                desired_item=(
-                    source.desired_item if source.gear_slot.code is GearSlotCode.HEAD else None
                 ),
                 raid_floor=(
                     source.raid_floor if source.gear_slot.code is GearSlotCode.HEAD else None
@@ -283,7 +278,7 @@ def test_weapon_upgrade_uses_highest_priority_eligible_alt_and_does_not_mutate_g
             CharacterGearSlot(gear_slot=weapon, current_classification=GearClassification.SAVAGE)
         )
     eligible = fixture.alts[0]
-    eligible.gear_slots[0].current_classification = GearClassification.CRAFTED
+    eligible.gear_slots[0].current_classification = GearClassification.CRAFTED_EX
     before = [(alt.id, alt.gear_slots[0].current_classification) for alt in fixture.alts]
     session.commit()
     result = plan_split_savage_loot(session, fixture.static.id)

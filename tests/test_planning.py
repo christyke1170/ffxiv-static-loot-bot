@@ -153,7 +153,6 @@ class PlanningFixture:
                     BisSetItem(
                         gear_slot=slot,
                         classification=GearClassification.SAVAGE,
-                        desired_item=Item(name=f"{character.name} {code.value} BiS"),
                         raid_floor=self.floor,
                         loot_type=self.coffer,
                     )
@@ -393,15 +392,12 @@ def test_one_pld_weapon_coffer_creates_one_bundled_assignment(
     regular.coffer.code = "WEAPON_COFFER"
     regular.coffer.name = "Fictional Weapon Coffer"
     bis_set = BisSet(job=pld.job, raid_tier=regular.tier, name="PLD Weapon Bundle")
-    sword = Item(name="Fictional PLD Sword")
-    shield = Item(name="Fictional PLD Shield")
     for code, slot in regular.slots.items():
         if code in {GearSlotCode.WEAPON, GearSlotCode.OFFHAND}:
             bis_set.items.append(
                 BisSetItem(
                     gear_slot=slot,
                     classification=GearClassification.SAVAGE,
-                    desired_item=sword if code is GearSlotCode.WEAPON else shield,
                     raid_floor=regular.floor,
                     loot_type=regular.coffer,
                 )
@@ -428,7 +424,7 @@ def test_one_pld_weapon_coffer_creates_one_bundled_assignment(
 def test_owned_matching_coffer_and_no_need_become_leftovers(regular: PlanningFixture) -> None:
     regular.select_bis(regular.mains[0])
     regular.session.add(
-        InventoryItem(character=regular.mains[0], item=regular.coffer_item, quantity=1)
+        InventoryItem(character=regular.mains[0], loot_type=regular.coffer, quantity=1)
     )
     regular.session.commit()
     result = generate_weekly_loot_plan(regular.session, regular.week.id)
@@ -467,8 +463,6 @@ def test_augmentation_additional_need_and_simulation_are_respected(
                 BisSetItem(
                     gear_slot=slot,
                     classification=GearClassification.AUGMENTED_TOME,
-                    desired_item=Item(name="Fictional Augmented Body"),
-                    base_tome_item=Item(name="Fictional Base Body"),
                     augmentation_material_type=material,
                 )
             )

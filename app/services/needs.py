@@ -17,12 +17,10 @@ from app.models import (
     GearClassification,
     GearSlot,
     GearSlotCode,
-    InventoryItem,
     LootCategory,
     LootType,
     RaidFloor,
     RaidTier,
-    job_uses_offhand,
 )
 from app.schemas.needs import (
     AugmentationNeed,
@@ -75,7 +73,7 @@ def calculate_characters_needs(
                 .execution_options(populate_existing=True)
                 .options(
                     selectinload(Character.gear_slots).joinedload(CharacterGearSlot.gear_slot),
-                    selectinload(Character.inventory_items).joinedload(InventoryItem.item),
+                    selectinload(Character.inventory_items),
                 )
             )
         )
@@ -107,10 +105,8 @@ def calculate_characters_needs(
                     .selectinload(BisSet.items)
                     .options(
                         joinedload(BisSetItem.gear_slot),
-                        joinedload(BisSetItem.desired_item),
                         joinedload(BisSetItem.raid_floor),
                         joinedload(BisSetItem.loot_type).joinedload(LootType.item),
-                        joinedload(BisSetItem.base_tome_item),
                         joinedload(BisSetItem.augmentation_material_type),
                     )
                 )
@@ -155,7 +151,7 @@ def _load_state(session: Session, character_id: int, raid_tier_id: int) -> _Load
         .execution_options(populate_existing=True)
         .options(
             selectinload(Character.gear_slots).joinedload(CharacterGearSlot.gear_slot),
-            selectinload(Character.inventory_items).joinedload(InventoryItem.item),
+            selectinload(Character.inventory_items),
         )
     )
     if character is None:
@@ -184,10 +180,8 @@ def _load_state(session: Session, character_id: int, raid_tier_id: int) -> _Load
             .selectinload(BisSet.items)
             .options(
                 joinedload(BisSetItem.gear_slot),
-                joinedload(BisSetItem.desired_item),
                 joinedload(BisSetItem.raid_floor),
                 joinedload(BisSetItem.loot_type).joinedload(LootType.item),
-                joinedload(BisSetItem.base_tome_item),
                 joinedload(BisSetItem.augmentation_material_type),
             )
         )
@@ -243,7 +237,11 @@ def _calculate(state: _LoadedState) -> CharacterNeedsResult:
         requirements[requirement.gear_slot_id].append(requirement)
 
     inventory = Counter(
-        {row.item_id: row.quantity for row in state.character.inventory_items if row.quantity > 0}
+        {
+            row.loot_type_id: row.quantity
+            for row in state.character.inventory_items
+            if row.loot_type_id is not None and row.quantity > 0
+        }
     )
     equipped = {row.gear_slot_id: row for row in state.character.gear_slots}
     remaining_materials = dict(state.material_owned)
@@ -266,7 +264,6 @@ def _calculate(state: _LoadedState) -> CharacterNeedsResult:
                     bis_set=bis_set,
                     slot=slot,
                     desired_classification=None,
-                    desired_item=None,
                     current_classification=equipped.get(slot.id).current_classification
                     if slot.id in equipped
                     else None,
@@ -323,12 +320,10 @@ def _calculate_slot(
         bis_set=bis_set,
         slot=requirement.gear_slot,
         desired_classification=requirement.classification,
-        desired_item=requirement.desired_item,
         current_classification=getattr(gear, "current_classification", None),
-        status=NeedStatus.NEEDS_EXACT_ITEM,
+        status=NeedStatus.NEEDS_CATEGORY,
         required_raid_floor=requirement.raid_floor,
         required_loot_type=requirement.loot_type,
-        required_base_tome_item=requirement.base_tome_item,
         required_augmentation_material=requirement.augmentation_material_type,
         book_cost=_book_cost(state.tier, requirement),
     )
@@ -345,62 +340,37 @@ def _calculate_slot(
         result.status = NeedStatus.MANUALLY_COMPLETE
         result.explanation = "This slot is manually marked complete."
         return result
-    desired_id = requirement.desired_item_id
-    if _same_source_is_complete(requirement, getattr(gear, "current_classification", None)):
+    current = getattr(gear, "current_classification", None)
+    if current is requirement.classification:
         result.status = NeedStatus.COMPLETE
-        result.explanation = "The equipped item has the required source classification."
-        return result
-    if desired_id is not None and inventory[desired_id] > 0:
-        result.status = NeedStatus.COMPLETE
-        result.explanation = "The exact desired final item is in inventory."
+        result.explanation = "Current gear exactly matches the desired category."
         return result
 
     if requirement.classification is GearClassification.SAVAGE:
         _set_savage_need(result, remaining_coffers)
     elif requirement.classification is GearClassification.AUGMENTED_TOME:
-        _set_augmentation_need(result, inventory, remaining_materials)
+        _set_augmentation_need(result, current, remaining_materials)
     else:
-        result.explanation = "The exact desired final item is not equipped or in inventory."
+        result.explanation = "Current gear does not match the desired category."
     return result
-
-
-def _same_source_is_complete(
-    requirement: BisSetItem,
-    current_classification: GearClassification | None,
-) -> bool:
-    """Complete supported desired sources by same-slot classification equality."""
-    if current_classification is not requirement.classification:
-        return False
-    return requirement.classification in {
-        GearClassification.CRAFTED,
-        GearClassification.EX_WEAPON,
-        GearClassification.SAVAGE,
-        GearClassification.TOME,
-        GearClassification.AUGMENTED_TOME,
-    }
 
 
 def _validate_requirement(tier: RaidTier, requirement: BisSetItem, warnings: list[str]) -> None:
     prefix = requirement.gear_slot.display_name
     if requirement.gear_slot.code is GearSlotCode.OFFHAND:
-        job = requirement.bis_set.job.abbreviation
-        uses_offhand = job_uses_offhand(job)
+        job = requirement.bis_set.job
+        uses_offhand = job.uses_offhand
         if uses_offhand and requirement.classification is GearClassification.NOT_APPLICABLE:
-            warnings.append(f"{prefix}: PLD offhand must define an applicable item requirement.")
+            warnings.append(f"{prefix}: offhand-capable job requires an applicable category.")
         elif (
             not uses_offhand and requirement.classification is not GearClassification.NOT_APPLICABLE
         ):
-            warnings.append(f"{prefix}: {job} offhand must be NOT_APPLICABLE.")
+            warnings.append(f"{prefix}: {job.abbreviation} offhand must be NOT_APPLICABLE.")
     if (
-        requirement.classification is not GearClassification.NOT_APPLICABLE
-        and requirement.desired_item_id is None
+        requirement.classification is GearClassification.AUGMENTED_TOME
+        and requirement.augmentation_material_type_id is None
     ):
-        warnings.append(f"{prefix}: applicable slot has no desired item.")
-    if requirement.classification is GearClassification.AUGMENTED_TOME:
-        if requirement.base_tome_item_id is None:
-            warnings.append(f"{prefix}: augmented tome requirement has no base item.")
-        if requirement.augmentation_material_type_id is None:
-            warnings.append(f"{prefix}: augmented tome requirement has no material type.")
+        warnings.append(f"{prefix}: augmented tome requirement has no material type.")
     for reference, label in (
         (requirement.raid_floor, "raid floor"),
         (requirement.loot_type, "loot type"),
@@ -438,16 +408,10 @@ def _set_savage_need(result: SlotNeedResult, remaining_coffers: Counter[int]) ->
     loot_type = result.required_loot_type
     if loot_type is None or loot_type.category is not LootCategory.COFFER:
         result.status = NeedStatus.NEEDS_SAVAGE_DROP
-        result.explanation = "The exact Savage item is still required."
+        result.explanation = "The Savage category is still required."
         return
-    if loot_type.item_id is None:
-        warning = f"{result.slot.display_name}: coffer loot type has no exact inventory item."
-        result.validation_warnings.append(warning)
-        result.status = NeedStatus.INVALID_CONFIGURATION
-        result.explanation = "The configured coffer cannot be matched to inventory."
-        return
-    if remaining_coffers[loot_type.item_id] > 0:
-        remaining_coffers[loot_type.item_id] -= 1
+    if remaining_coffers[loot_type.id] > 0:
+        remaining_coffers[loot_type.id] -= 1
         result.matching_unopened_coffer_owned = True
         result.status = NeedStatus.OWNED_COFFER_AVAILABLE
         result.explanation = "A matching unopened coffer is owned but has not been redeemed."
@@ -458,11 +422,10 @@ def _set_savage_need(result: SlotNeedResult, remaining_coffers: Counter[int]) ->
 
 def _set_augmentation_need(
     result: SlotNeedResult,
-    inventory: Counter[int],
+    current: GearClassification | None,
     remaining_materials: dict[int, int],
 ) -> None:
-    base_id = result.required_base_tome_item.id  # validated as present
-    result.base_tome_item_owned = inventory[base_id] > 0
+    result.base_tome_item_owned = current is GearClassification.TOME
     material_id = result.required_augmentation_material.id  # validated as present
     available = remaining_materials.get(material_id, 0)
     result.enough_augmentation_material = available > 0
@@ -470,7 +433,7 @@ def _set_augmentation_need(
         remaining_materials[material_id] = available - 1
     if not result.base_tome_item_owned:
         result.status = NeedStatus.NEEDS_BASE_TOME_ITEM
-        result.explanation = "The exact base tome item is not equipped or in inventory."
+        result.explanation = "The current category is not Tome; the base Tome item is missing."
     elif result.enough_augmentation_material:
         result.status = NeedStatus.READY_TO_AUGMENT
         result.explanation = "The base tome item and an allocated augmentation material are owned."
@@ -585,8 +548,7 @@ def _group_coffers(
     return [
         OwnedCofferAvailability(
             rows[0].required_loot_type,
-            rows[0].required_loot_type.item,
-            inventory[rows[0].required_loot_type.item_id],
+            inventory[rows[0].required_loot_type.id],
             len(rows),
             [row.slot for row in rows],
         )

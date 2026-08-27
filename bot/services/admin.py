@@ -26,6 +26,7 @@ from app.models import (
     StaticMember,
     UserStaticPreference,
 )
+from app.services.character_gear import initialize_character_gear, reconcile_character_offhand
 
 OPEN_WORKFLOW_STATES = tuple(
     state
@@ -50,11 +51,12 @@ def guild(session: Session, discord_id: int, name: str) -> DiscordGuild:
     return row
 
 
-def create_static(session: Session, guild_id: int, name: str) -> Static:
+def create_static(session: Session, guild_id: int, name: str, crafted_item_level: int) -> Static:
     name = _required_text(name, "Static name", 100)
     if session.scalar(select(Static).where(Static.guild_id == guild_id, Static.name == name)):
         raise ValueError("A static with that name already exists in this guild.")
-    row = Static(guild_id=guild_id, name=name)
+    _positive_item_level(crafted_item_level)
+    row = Static(guild_id=guild_id, name=name, crafted_item_level=crafted_item_level)
     session.add(row)
     session.flush()
     return row
@@ -249,6 +251,7 @@ def add_character(
     row = Character(static_member=member, job=job, name=name, world=world, kind=kind)
     session.add(row)
     session.flush()
+    initialize_character_gear(session, row)
     return row
 
 
@@ -336,7 +339,10 @@ def edit_character(
     character.name = values["name"]
     character.world = values["world"]
     character.kind = values["kind"]
+    job_changed = job.id != character.job_id
     character.job = job
+    if job_changed:
+        reconcile_character_offhand(session, character)
     _audit(
         session,
         static.id,
@@ -347,6 +353,31 @@ def edit_character(
         {"before": before, "cleared_bis": len(incompatible)},
     )
     return character, len(incompatible)
+
+
+def set_crafted_item_level(
+    session: Session, static: Static, value: int, actor_id: int
+) -> tuple[int | None, int]:
+    _positive_item_level(value)
+    previous = static.crafted_item_level
+    if previous == value:
+        raise ValueError("The static already uses that crafted item level.")
+    static.crafted_item_level = value
+    _audit(
+        session,
+        static.id,
+        actor_id,
+        "STATIC_CRAFTED_ITEM_LEVEL_CHANGED",
+        "Static",
+        static.id,
+        {"previous": previous, "new": value},
+    )
+    return previous, value
+
+
+def _positive_item_level(value: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 10_000:
+        raise ValueError("Crafted item level must be a positive integer no greater than 10,000.")
 
 
 def set_character_active(

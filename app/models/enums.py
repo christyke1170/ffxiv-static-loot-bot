@@ -12,14 +12,8 @@ class GearClassification(StrEnum):
     SAVAGE = "SAVAGE"
     AUGMENTED_TOME = "AUGMENTED_TOME"
     TOME = "TOME"
-    CRAFTED = "CRAFTED"
-    EX_WEAPON = "EX_WEAPON"
+    CRAFTED_EX = "CRAFTED_EX"
     GARBAGE = "GARBAGE"
-    CATCHUP = "CATCHUP"
-    RELIC = "RELIC"
-    NORMAL_RAID = "NORMAL_RAID"
-    EITHER = "EITHER"
-    OTHER = "OTHER"
     NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
@@ -36,11 +30,6 @@ class GearSlotCode(StrEnum):
     BRACELETS = "BRACELETS"
     RING_1 = "RING_1"
     RING_2 = "RING_2"
-
-
-def job_uses_offhand(job_abbreviation: str) -> bool:
-    """Return whether an FFXIV combat job equips a separate offhand item."""
-    return job_abbreviation.upper() == "PLD"
 
 
 class LootAssignmentState(StrEnum):

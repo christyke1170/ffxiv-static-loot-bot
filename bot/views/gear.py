@@ -24,8 +24,7 @@ MAX_COMPONENTS = 25
 MAX_MODAL_INPUTS = 5
 MAX_BOOK_BALANCE = 1_000_000
 STATE_LABELS = {
-    GearClassification.CRAFTED: "Crafted",
-    GearClassification.EX_WEAPON: "EX",
+    GearClassification.CRAFTED_EX: "Crafted / EX",
     GearClassification.SAVAGE: "Savage",
     GearClassification.TOME: "Tome",
     GearClassification.AUGMENTED_TOME: "Augmented Tome",
@@ -188,9 +187,7 @@ class GearEditorView(discord.ui.View):
                 for row in session.scalars(
                     select(CharacterFloorBookBalance).where(
                         CharacterFloorBookBalance.character_id == self.character_id,
-                        CharacterFloorBookBalance.raid_floor_id.in_(
-                            [floor.id for floor in floors]
-                        ),
+                        CharacterFloorBookBalance.raid_floor_id.in_([floor.id for floor in floors]),
                     )
                 )
             }
@@ -198,24 +195,24 @@ class GearEditorView(discord.ui.View):
                 character.static_member.display_name,
                 character.kind.value.title(),
                 character.job.abbreviation,
+                character.job.uses_offhand,
                 slots,
                 current,
                 tuple(
-                    (floor.id, floor.floor_number, balances.get(floor.id, 0))
-                    for floor in floors
+                    (floor.id, floor.floor_number, balances.get(floor.id, 0)) for floor in floors
                 ),
             )
 
     def _build(self, notice: str | None = None) -> None:
         self.clear_items()
-        name, kind, job, slots, current, books = self._load()
-        non_pld_offhand = job.upper() != "PLD"
+        name, kind, job, uses_offhand, slots, current, books = self._load()
+        offhand_not_applicable = not uses_offhand
         options = []
         for slot in slots:
             state = current.get(slot.id)
             state_label = (
                 "N/A"
-                if slot.code is GearSlotCode.OFFHAND and non_pld_offhand
+                if slot.code is GearSlotCode.OFFHAND and offhand_not_applicable
                 else STATE_LABELS.get(state, "Missing")
             )
             options.append(
@@ -232,7 +229,7 @@ class GearEditorView(discord.ui.View):
         slot_select.callback = self.select_slot
         self.add_item(slot_select)
 
-        selected_is_na = self.selected_slot is GearSlotCode.OFFHAND and non_pld_offhand
+        selected_is_na = self.selected_slot is GearSlotCode.OFFHAND and offhand_not_applicable
         state_select = discord.ui.Select(
             placeholder="Choose current state",
             options=[
@@ -253,9 +250,7 @@ class GearEditorView(discord.ui.View):
         close = discord.ui.Button(
             label="Close", style=discord.ButtonStyle.danger, custom_id="gear-editor:close"
         )
-        adjust_books = discord.ui.Button(
-            label="Adjust Books", custom_id="gear-editor:adjust-books"
-        )
+        adjust_books = discord.ui.Button(label="Adjust Books", custom_id="gear-editor:adjust-books")
         reset.callback = self.reset_slot
         adjust_books.callback = self.adjust_books
         close.callback = self.close
@@ -273,7 +268,7 @@ class GearEditorView(discord.ui.View):
             )
         )
         if selected_is_na:
-            self.content += " — **N/A for non-PLD jobs**"
+            self.content += " — **N/A for this job**"
         if notice:
             self.content += f"\n{notice}"
         assert len(list(self.walk_children())) <= MAX_COMPONENTS

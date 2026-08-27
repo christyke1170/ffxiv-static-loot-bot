@@ -23,7 +23,6 @@ from app.models import (
     GearClassification,
     GearSlot,
     GearSlotCode,
-    Item,
     Job,
     JobHierarchy,
     JobHierarchyEntry,
@@ -96,8 +95,6 @@ def test_augmented_tome_and_savage_requirements(session: Session) -> None:
         bis_set=bis_set,
         gear_slot=slot,
         classification=GearClassification.AUGMENTED_TOME,
-        desired_item=Item(name="Augmented Hat"),
-        base_tome_item=Item(name="Tome Hat"),
         tome_cost=495,
         augmentation_material_type=material,
     )
@@ -106,14 +103,12 @@ def test_augmented_tome_and_savage_requirements(session: Session) -> None:
         bis_set=bis_set,
         gear_slot=savage_slot,
         classification=GearClassification.SAVAGE,
-        desired_item=Item(name="Savage Body"),
         raid_floor=floor,
         loot_type=coffer,
         book_cost=6,
     )
     session.add_all([augmented, savage])
     session.commit()
-    assert augmented.base_tome_item.name == "Tome Hat"
     assert augmented.augmentation_material_type is material
     assert savage.raid_floor is floor and savage.loot_type is coffer
 
@@ -127,10 +122,9 @@ def test_invalid_augmented_tome_and_not_applicable(session: Session) -> None:
             bis_set=bis_set,
             gear_slot=slot,
             classification=GearClassification.AUGMENTED_TOME,
-            desired_item=Item(name="Augmented Shield"),
         )
     )
-    with pytest.raises(ValueError, match="base_tome_item"):
+    with pytest.raises(ValueError, match="augmentation_material_type"):
         session.flush()
     session.rollback()
 
@@ -142,13 +136,12 @@ def test_invalid_augmented_tome_and_not_applicable(session: Session) -> None:
     )
     session.add(valid)
     session.commit()
-    assert valid.desired_item is None
+    assert valid.classification is GearClassification.NOT_APPLICABLE
 
 
 def test_pld_not_applicable_offhand_is_rejected_by_model_validation(session: Session) -> None:
     character, tier, _ = foundation(session)
-    character.job.abbreviation = "PLD"
-    character.job.name = "Paladin"
+    character.job.uses_offhand = True
     slot = GearSlot(code=GearSlotCode.OFFHAND, display_name="Offhand", sort_order=2)
     bis_set = BisSet(job=character.job, raid_tier=tier, name="Invalid PLD Offhand")
     session.add(
@@ -159,7 +152,7 @@ def test_pld_not_applicable_offhand_is_rejected_by_model_validation(session: Ses
         )
     )
 
-    with pytest.raises(ValueError, match="PLD OFFHAND must define an applicable"):
+    with pytest.raises(ValueError, match="offhand-capable jobs must define an applicable"):
         session.flush()
 
 
@@ -288,7 +281,8 @@ def assignment_foundation(
         raid_floor=floor,
         loot_type=loot_type,
         intended_character=character,
-        intended_final_item=Item(name="Intended Hat"),
+        gear_slot=current.gear_slot,
+        resulting_classification=GearClassification.SAVAGE,
     )
     session.add_all([assignment, current])
     session.flush()

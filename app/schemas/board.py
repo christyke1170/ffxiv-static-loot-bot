@@ -42,7 +42,6 @@ class BoardSlot:
     sort_order: int
     desired_classification: GearClassification | None
     current_classification: GearClassification | None
-    desired_item: str | None
     needs_status: NeedStatus
     display_status: DisplayStatus
     required_floor_number: int | None
@@ -67,6 +66,8 @@ class BoardPlayer:
     materials: tuple[BoardMaterial, ...]
     complete_slots: int
     applicable_slots: int
+    average_item_level: int | None = None
+    item_level_warnings: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
 

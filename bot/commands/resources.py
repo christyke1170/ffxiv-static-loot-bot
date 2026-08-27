@@ -1,12 +1,12 @@
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.models import (
     CharacterAugmentationInventory,
     CharacterFloorBookBalance,
+    GearClassification,
     InventoryItem,
-    Item,
 )
 from app.services.gear import set_augmentation_material, set_books, set_inventory
 from bot.checks import require_raid_leader
@@ -15,7 +15,7 @@ from bot.services.gear import character, floor, material
 
 
 class Inventory(commands.Cog):
-    group = app_commands.Group(name="inventory", description="Manage exact item inventory")
+    group = app_commands.Group(name="inventory", description="Manage unequipped gear categories")
 
     def __init__(self, bot):
         self.bot = bot
@@ -26,21 +26,26 @@ class Inventory(commands.Cog):
         self,
         interaction,
         character_name: str,
-        item_name: str,
+        gear_slot: str,
+        category: str,
         quantity: int,
-        item_level: int | None = None,
-        external_item_id: int | None = None,
     ):
         await defer(interaction, ephemeral=True)
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             target = character(session, static, character_name)
+            from bot.services.gear import slot
+
+            target_slot = slot(session, gear_slot)
+            try:
+                classification = GearClassification[category.upper()]
+            except KeyError as exc:
+                raise ValueError("Unknown gear category.") from exc
             existing = session.scalar(
-                select(InventoryItem)
-                .join(Item)
-                .where(
+                select(InventoryItem).where(
                     InventoryItem.character_id == target.id,
-                    func.lower(Item.name) == item_name.strip().lower(),
+                    InventoryItem.gear_slot_id == target_slot.id,
+                    InventoryItem.classification == classification,
                 )
             )
             before = existing.quantity if existing else None
@@ -48,11 +53,10 @@ class Inventory(commands.Cog):
                 session,
                 static,
                 target,
-                item_name,
+                target_slot,
+                classification,
                 quantity,
                 interaction.user.id,
-                item_level=item_level,
-                external_item_id=external_item_id,
             )
             action = (
                 "cleared"

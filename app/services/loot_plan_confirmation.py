@@ -129,7 +129,7 @@ def _load_plan(session, plan_id, lock=False):
                 joinedload(LootAssignment.raid_floor),
                 joinedload(LootAssignment.loot_type),
                 joinedload(LootAssignment.intended_character),
-                joinedload(LootAssignment.intended_bis_set_item),
+                joinedload(LootAssignment.gear_slot),
                 selectinload(LootAssignment.completion_items),
             ),
         )
@@ -292,23 +292,17 @@ def _apply_assignments(session, plan, static, runs, actor):
             set_gear(session, static, recipient, slot, GearClassification.AUGMENTED_TOME, actor)
             counts[3] += 1
         else:
-            if (
-                assignment.intended_bis_set_item_id is None
-                or assignment.intended_final_item_id is None
-            ):
+            if assignment.gear_slot is None or assignment.resulting_classification is None:
                 raise LootPlanIntegrityError(
-                    "Savage assignment has no exact persisted gear target."
-                )
-            requirement = assignment.intended_bis_set_item
-            if (
-                requirement is None
-                or requirement.desired_item_id != assignment.intended_final_item_id
-            ):
-                raise LootPlanIntegrityError(
-                    "Savage assignment exact item relationship is invalid."
+                    "Gear assignment has no persisted slot/category target."
                 )
             set_gear(
-                session, static, recipient, requirement.gear_slot, GearClassification.SAVAGE, actor
+                session,
+                static,
+                recipient,
+                assignment.gear_slot,
+                assignment.resulting_classification,
+                actor,
             )
             counts[0] += 1
     return tuple(counts)

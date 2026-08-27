@@ -1,6 +1,7 @@
+import pytest
 from sqlalchemy import func, select
 
-from app.models import Static, StaticMember, UserStaticPreference
+from app.models import AuditLog, CharacterGearSlot, Static, StaticMember, UserStaticPreference
 from bot.commands.static import Static as StaticCog
 from tests.bot.fakes import invoke_registered
 from tests.bot.helpers import arrange_static
@@ -9,20 +10,60 @@ from tests.bot.helpers import arrange_static
 async def test_static_create_persists_and_replies(bot, interaction_factory):
     interaction = interaction_factory()
 
-    await invoke_registered(StaticCog(bot), "create", interaction, "Progression")
+    await invoke_registered(StaticCog(bot), "create", interaction, "Progression", 710)
 
     with bot.session_factory() as session:
         row = session.scalar(select(Static).where(Static.name == "Progression"))
         assert row is not None and row.guild.discord_guild_id == 100
+        assert row.crafted_item_level == 710
     assert "Created static **Progression**" in interaction.messages[0]["content"]
+
+
+@pytest.mark.parametrize("value", [0, -1])
+async def test_static_create_rejects_nonpositive_baseline(bot, interaction_factory, value):
+    interaction = interaction_factory()
+    await invoke_registered(StaticCog(bot), "create", interaction, "Invalid", value)
+    with bot.session_factory() as session:
+        assert session.scalar(select(Static)) is None
+    assert "positive integer" in interaction.messages[0]["content"]
+
+
+async def test_item_level_command_audits_once_without_rewriting_gear(bot, interaction_factory):
+    static_id = arrange_static(bot)
+    with bot.session_factory() as session:
+        static = session.get(Static, static_id)
+        static.crafted_item_level = None
+        session.commit()
+        before = session.scalar(select(func.count()).select_from(CharacterGearSlot))
+    interaction = interaction_factory()
+    await invoke_registered(StaticCog(bot), "item-level", interaction, 710)
+    with bot.session_factory() as session:
+        static = session.get(Static, static_id)
+        assert static.crafted_item_level == 710
+        assert session.scalar(select(func.count()).select_from(CharacterGearSlot)) == before
+        audits = list(
+            session.scalars(
+                select(AuditLog).where(AuditLog.action == "STATIC_CRAFTED_ITEM_LEVEL_CHANGED")
+            )
+        )
+        assert len(audits) == 1
+    assert "not configured" in interaction.messages[0]["content"]
+
+
+async def test_item_level_command_requires_permission(bot, interaction_factory):
+    static_id = arrange_static(bot)
+    interaction = interaction_factory(roles=())
+    await invoke_registered(StaticCog(bot), "item-level", interaction, 710)
+    with bot.session_factory() as session:
+        assert session.get(Static, static_id).crafted_item_level is None
 
 
 async def test_duplicate_static_returns_user_safe_error(bot, interaction_factory):
     cog = StaticCog(bot)
-    await invoke_registered(cog, "create", interaction_factory(), "Duplicate")
+    await invoke_registered(cog, "create", interaction_factory(), "Duplicate", 710)
     interaction = interaction_factory()
 
-    await invoke_registered(cog, "create", interaction, "Duplicate")
+    await invoke_registered(cog, "create", interaction, "Duplicate", 710)
 
     with bot.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(Static)) == 1

@@ -27,7 +27,6 @@ from app.models import (
     ReclearWorkflowState,
     Static,
     WeeklyLockout,
-    job_uses_offhand,
 )
 from app.schemas.needs import CharacterNeedsResult, NeedStatus, SlotNeedResult
 from app.schemas.planning import (
@@ -335,7 +334,10 @@ def generate_weekly_loot_plan(
                     loot_type=rule.loot_type,
                     intended_character=winner.character if winner else None,
                     intended_bis_set_item=winner.intended_bis_set_item if winner else None,
-                    intended_final_item=winner.intended_final_item if winner else None,
+                    gear_slot=winner.intended_slot if winner else None,
+                    resulting_classification=(
+                        winner.intended_bis_set_item.classification if winner else None
+                    ),
                     suggested_recipient=winner.character if winner else None,
                     backup_recipient=backup.character if backup else None,
                     expected_drop_instance=instance,
@@ -351,10 +353,9 @@ def generate_weekly_loot_plan(
                 assignment.completion_items = [
                     LootAssignmentCompletionItem(
                         bis_set_item=requirement,
-                        intended_final_item=requirement.desired_item,
+                        resulting_classification=requirement.classification,
                     )
                     for requirement in bundled
-                    if requirement.desired_item is not None
                 ]
     with session.begin_nested():
         session.add(plan)
@@ -531,7 +532,6 @@ def _rank_recipients(
                 receipt_counts[character.id],
                 requirement,
                 row.slot,
-                row.desired_item,
                 owns_base,
                 reason,
             )
@@ -565,11 +565,11 @@ def _completion_requirements(
     if primary is None:
         return requirements[:1]
     primary_slot = primary.gear_slot.code
-    job = primary.bis_set.job.abbreviation
+    job = primary.bis_set.job
     weapon_slots = {GearSlotCode.WEAPON, GearSlotCode.OFFHAND}
-    # FFXIV's PLD weapon coffer yields its sword and shield together. No other
+    # An offhand-capable job's weapon coffer yields both weapon slots. No other
     # same-loot-type slots are bundled; they still require separate physical drops.
-    if job_uses_offhand(job) and primary_slot in weapon_slots:
+    if job.uses_offhand and primary_slot in weapon_slots:
         bundled = [item for item in requirements if item.gear_slot.code in weapon_slots]
         if {item.gear_slot.code for item in bundled} == weapon_slots:
             return bundled
@@ -626,7 +626,6 @@ def _result_from_plan(
             intended_bis_slot=(
                 row.intended_bis_set_item.gear_slot if row.intended_bis_set_item else None
             ),
-            intended_final_item=row.intended_final_item,
             backup_recipient=row.backup_recipient,
             state=row.state,
             reason=row.planning_reason or "",

@@ -215,10 +215,8 @@ def _character_snapshot(character, jobs, slots, selections, gear, inventory, mat
                 {
                     "slot_id": item.gear_slot_id,
                     "classification": item.classification.value,
-                    "desired_item_id": item.desired_item_id,
                     "floor_id": item.raid_floor_id,
                     "loot_type_id": item.loot_type_id,
-                    "base_tome_item_id": item.base_tome_item_id,
                     "material_id": item.augmentation_material_type_id,
                 }
                 for item in sorted(selection.bis_set.items, key=lambda row: row.gear_slot_id)
@@ -247,11 +245,20 @@ def _character_snapshot(character, jobs, slots, selections, gear, inventory, mat
         ),
         "inventory": sorted(
             [
-                {"item_id": row.item_id, "quantity": row.quantity}
+                {
+                    "loot_type_id": row.loot_type_id,
+                    "slot_id": row.gear_slot_id,
+                    "classification": row.classification.value if row.classification else None,
+                    "quantity": row.quantity,
+                }
                 for row in inventory
                 if row.character_id == character.id
             ],
-            key=lambda row: row["item_id"],
+            key=lambda row: (
+                row["loot_type_id"] or 0,
+                row["slot_id"] or 0,
+                row["classification"] or "",
+            ),
         ),
         "materials": sorted(
             [

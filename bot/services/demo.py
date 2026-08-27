@@ -15,7 +15,6 @@ from app.models import (
     DistributionError,
     GearClassification,
     GearSlot,
-    Item,
     Job,
     LootAssignment,
     LootPlan,
@@ -128,7 +127,7 @@ def create_demo_static(
 
     seed_reference_data(session)
     guild_row = guild(session, discord_guild_id, guild_name)
-    static = create_static(session, guild_row.id, DEMO_STATIC_NAME)
+    static = create_static(session, guild_row.id, DEMO_STATIC_NAME, 710)
     tier = import_raid_tier(session, _tier_data(discord_guild_id))
     assert tier is not None
     select_tier(static, tier)
@@ -159,7 +158,8 @@ def create_demo_static(
             ALT_JOBS[index],
         )
 
-    imported_sets = import_bis_sets(session, _bis_data(discord_guild_id))
+    offhand_jobs = {row.abbreviation: row.uses_offhand for row in session.scalars(select(Job))}
+    imported_sets = import_bis_sets(session, _bis_data(discord_guild_id, offhand_jobs))
     sets_by_job = {row.job.abbreviation: row for row in imported_sets}
     characters = [character for member in members for character in member.characters]
     for character in characters:
@@ -176,7 +176,6 @@ def create_demo_static(
         static,
         tuple(character for character in characters if character.kind is CharacterKind.MAIN),
     )
-    _ensure_demo_item_levels(session, tier)
     hierarchy = set_hierarchy(session, static, ",".join(MAIN_JOBS))
     hierarchy.name = "Fictional Demo Main Job Priority"
     select_static(session, guild_row.id, invoking_user_id, static)
@@ -204,9 +203,15 @@ def refresh_demo_static(
     _require_demo_workflows_closed(session, static.id)
     counts = {"created": 0, "updated": 0, "unchanged": 0, "rejected": 0}
     tier = static.active_raid_tier
-    expected_sets = {row["job"]: row for row in _bis_data(discord_guild_id)["sets"]}
     slots = {row.code.name: row for row in session.scalars(select(GearSlot))}
     jobs = {row.abbreviation: row for row in session.scalars(select(Job))}
+    expected_sets = {
+        row["job"]: row
+        for row in _bis_data(
+            discord_guild_id,
+            {code: job.uses_offhand for code, job in jobs.items()},
+        )["sets"]
+    }
     sets_by_job: dict[str, BisSet] = {}
     for job_code, data in expected_sets.items():
         bis_set = session.scalar(
@@ -234,8 +239,6 @@ def refresh_demo_static(
     for character in characters:
         change = select_bis(session, character, tier, sets_by_job[character.job.abbreviation])
         counts["updated" if change.changed else "unchanged"] += 1
-    if _ensure_demo_item_levels(session, tier):
-        counts["updated"] += 1
 
     expected_state = _current_state(discord_guild_id, characters)
     expected_gear = {
@@ -253,7 +256,7 @@ def refresh_demo_static(
                         CharacterGearSlot.gear_slot_id == slots[slot_code].id,
                     )
                 )
-                if slot_code == "OFFHAND" and character.job.abbreviation != "PLD" and existing:
+                if slot_code == "OFFHAND" and not character.job.uses_offhand and existing:
                     session.delete(existing)
                     counts["updated"] += 1
                 else:
@@ -436,11 +439,8 @@ def _reconcile_bis_set(
             row = BisSetItem(bis_set=bis_set, gear_slot=slots[item_data["slot"]])
             session.add(row)
             changed = True
-        desired = _demo_item(session, item_data.get("desired_item"))
-        base = _demo_item(session, item_data.get("base_tome_item"))
         values = {
             "classification": GearClassification[item_data["classification"]],
-            "desired_item": desired,
             "raid_floor": next(
                 (floor for floor in tier.floors if floor.floor_number == item_data.get("floor")),
                 None,
@@ -449,7 +449,6 @@ def _reconcile_bis_set(
                 (loot for loot in tier.loot_types if loot.code == item_data.get("loot_type")),
                 None,
             ),
-            "base_tome_item": base,
             "tome_cost": item_data.get("tome_cost"),
             "augmentation_material_type": next(
                 (
@@ -463,59 +462,10 @@ def _reconcile_bis_set(
             "notes": item_data.get("notes"),
         }
         for field, value in values.items():
-            current = getattr(row, field)
-            current_id = getattr(current, "id", current)
-            value_id = getattr(value, "id", value)
-            if current_id != value_id:
+            if getattr(row, field) != value:
                 setattr(row, field, value)
                 changed = True
     return changed
-
-
-def _ensure_demo_item_levels(session: Session, tier: RaidTier) -> bool:
-    """Give fictional desired/base items explicit levels for board presentation."""
-    changed = False
-    for bis_set in tier.bis_sets:
-        for requirement in bis_set.items:
-            if requirement.desired_item is not None and requirement.desired_item.item_level != 730:
-                requirement.desired_item.item_level = 730
-                changed = True
-            if (
-                requirement.base_tome_item is not None
-                and requirement.base_tome_item.item_level != 710
-            ):
-                requirement.base_tome_item.item_level = 710
-                changed = True
-    return changed
-
-
-def _demo_item(
-    session: Session,
-    name: str | None,
-    *,
-    item_level: int | None = None,
-    external_item_id: int | None = None,
-) -> Item | None:
-    if name is None:
-        return None
-    row = session.scalar(select(Item).where(Item.name == name))
-    if row is None:
-        row = Item(name=name)
-        session.add(row)
-        session.flush()
-    if item_level is not None and row.item_level != item_level:
-        row.item_level = item_level
-    if external_item_id is not None and row.external_item_id != external_item_id:
-        existing = session.scalar(
-            select(Item).where(
-                Item.external_item_id == external_item_id,
-                Item.id != row.id,
-            )
-        )
-        if existing is not None:
-            raise ValueError("Fictional demo external item ID is ambiguous.")
-        row.external_item_id = external_item_id
-    return row
 
 
 def _reconcile_current_gear(
@@ -619,31 +569,19 @@ def _tier_data(guild_id: int) -> dict:
     }
 
 
-def _bis_data(guild_id: int) -> dict:
+def _bis_data(guild_id: int, offhand_jobs: dict[str, bool]) -> dict:
     prefix = _prefix(guild_id)
     sets = []
     for job in MAIN_JOBS + ALT_JOBS:
         item_prefix = f"{prefix} {job}"
         items = []
         for slot in SLOTS:
-            if slot == "OFFHAND" and job != "PLD":
+            if slot == "OFFHAND" and not offhand_jobs[job]:
                 items.append({"slot": slot, "classification": "NOT_APPLICABLE"})
-            elif slot == "OFFHAND":
+            elif slot in {"OFFHAND", "WEAPON"}:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Savage Shield",
-                        "classification": "SAVAGE",
-                        "floor": 4,
-                        "loot_type": "WEAPON_COFFER",
-                        "book_cost": 8,
-                    }
-                )
-            elif slot == "WEAPON":
-                items.append(
-                    {
-                        "slot": slot,
-                        "desired_item": f"{item_prefix} Savage Weapon",
                         "classification": "SAVAGE",
                         "floor": 4,
                         "loot_type": "WEAPON_COFFER",
@@ -654,7 +592,6 @@ def _bis_data(guild_id: int) -> dict:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Savage Head",
                         "classification": "SAVAGE",
                         "floor": 2,
                         "loot_type": "HEAD_COFFER",
@@ -665,9 +602,7 @@ def _bis_data(guild_id: int) -> dict:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Augmented Body",
                         "classification": "AUGMENTED_TOME",
-                        "base_tome_item": f"{item_prefix} Base Tome Body",
                         "tome_cost": 825,
                         "augmentation_material": "ARMOR_TWINE",
                     }
@@ -676,7 +611,6 @@ def _bis_data(guild_id: int) -> dict:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Savage Earrings",
                         "classification": "SAVAGE",
                         "floor": 1,
                         "loot_type": "ACCESSORY_COFFER",
@@ -687,9 +621,7 @@ def _bis_data(guild_id: int) -> dict:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Augmented Ring",
                         "classification": "AUGMENTED_TOME",
-                        "base_tome_item": f"{item_prefix} Base Tome Ring",
                         "tome_cost": 375,
                         "augmentation_material": "ACCESSORY_GLAZE",
                     }
@@ -698,7 +630,6 @@ def _bis_data(guild_id: int) -> dict:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Tome Hands",
                         "classification": "TOME",
                         "tome_cost": 495,
                     }
@@ -707,8 +638,7 @@ def _bis_data(guild_id: int) -> dict:
                 items.append(
                     {
                         "slot": slot,
-                        "desired_item": f"{item_prefix} Fictional Crafted {slot.title()}",
-                        "classification": "CRAFTED",
+                        "classification": "CRAFTED_EX",
                     }
                 )
         sets.append(
@@ -726,42 +656,34 @@ def _bis_data(guild_id: int) -> dict:
 
 
 def _current_state(guild_id: int, characters: list) -> dict:
-    prefix = _prefix(guild_id)
     rows = []
     for index, character in enumerate(characters):
         gear = []
         for slot in SLOTS:
-            if slot == "OFFHAND" and character.job.abbreviation != "PLD":
+            if slot == "OFFHAND" and not character.job.uses_offhand:
                 continue
             gear.append(
                 {
                     "slot": slot,
-                    "current_classification": "CRAFTED",
+                    "current_classification": "CRAFTED_EX",
                 }
             )
 
-        # Base tome gear is intentionally equipped for some augmented goals. The
-        # remaining rows retain different current sources so the demo shows both
-        # READY_TO_AUGMENT and NEEDS_AUGMENTATION.
-        if index % 4 == 0:
-            body = next(row for row in gear if row["slot"] == "BODY")
-            body["current_classification"] = "TOME"
+        # Every augmented-Tome target owns its base through current category state.
+        for code in ("BODY", "RING_1"):
+            row = next(value for value in gear if value["slot"] == code)
+            row["current_classification"] = "TOME"
 
-        item_prefix = f"{prefix} {character.job.abbreviation}"
-        inventory = [{"item": f"{item_prefix} Base Tome Body", "quantity": 1, "item_level": 710}]
+        inventory = [{"slot": "BODY", "classification": "TOME", "quantity": 1}]
         materials = []
         if index % 4 == 0:
             materials.append({"material": "ARMOR_TWINE", "quantity": 1})
         elif index % 4 == 2:
-            inventory.append({"item": f"{prefix} Head Coffer", "quantity": 1, "item_level": 0})
+            inventory.append({"loot_type": "HEAD_COFFER", "quantity": 1})
         else:
-            inventory.append(
-                {"item": f"{item_prefix} Savage Earrings", "quantity": 1, "item_level": 730}
-            )
+            inventory.append({"slot": "EARRINGS", "classification": "SAVAGE", "quantity": 1})
         if index % 5 == 0:
-            inventory.append(
-                {"item": f"{item_prefix} Base Tome Ring", "quantity": 1, "item_level": 710}
-            )
+            inventory.append({"slot": "RING_1", "classification": "TOME", "quantity": 1})
             materials.append({"material": "ACCESSORY_GLAZE", "quantity": 1})
 
         rows.append(
@@ -774,12 +696,3 @@ def _current_state(guild_id: int, characters: list) -> dict:
             }
         )
     return {"characters": rows}
-
-
-def _demo_external_item_id(
-    guild_id: int, character_index: int, slot_index: int, *, exact: bool = False, base: bool = False
-) -> int:
-    """Return stable positive fictional external IDs without name-based inference."""
-    namespace = guild_id % 1_000_000
-    variant = 2 if exact else 1 if base else 0
-    return 1_000_000_000 + namespace * 10_000 + character_index * 100 + slot_index * 3 + variant

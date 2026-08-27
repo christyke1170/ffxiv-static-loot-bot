@@ -25,7 +25,6 @@ from app.models import (
     GearClassification,
     GearSlot,
     GearSlotCode,
-    InventoryItem,
     Item,
     Job,
     LootAssignment,
@@ -157,9 +156,6 @@ class RegularFixture:
                             if config
                             else GearClassification.NOT_APPLICABLE
                         ),
-                        desired_item=(
-                            Item(name=f"{main.name} {slot.code.value} Desired") if config else None
-                        ),
                         raid_floor=self.floors[config[0]] if config else None,
                         loot_type=self.loot_types[config[1]] if config else None,
                         book_cost=8
@@ -200,7 +196,6 @@ class RegularFixture:
         requirement.raid_floor = None
         requirement.loot_type = None
         requirement.book_cost = None
-        requirement.base_tome_item = Item(name=f"{character.name} {slot.value} Base Tome")
         requirement.augmentation_material_type = self.materials[material_code]
         self.session.commit()
         return requirement
@@ -416,24 +411,19 @@ def test_same_job_tie_uses_static_roster_order(regular: RegularFixture) -> None:
     assert assignment(regular.result(), "Head Coffer").recipient.character_name == "Main 1"
 
 
-@pytest.mark.parametrize("completion", ["equipped", "manual", "inventory"])
+@pytest.mark.parametrize("completion", ["equipped", "manual"])
 def test_completed_savage_slot_is_ineligible(regular: RegularFixture, completion: str) -> None:
     winner = regular.mains[-1]
     requirement = regular.requirement(winner, GearSlotCode.HEAD)
-    if completion == "inventory":
-        winner.inventory_items.append(InventoryItem(item=requirement.desired_item, quantity=1))
-    else:
-        winner.gear_slots.append(
-            CharacterGearSlot(
-                gear_slot=requirement.gear_slot,
-                current_classification=(
-                    GearClassification.GARBAGE
-                    if completion == "manual"
-                    else GearClassification.SAVAGE
-                ),
-                manually_complete=completion == "manual",
-            )
+    winner.gear_slots.append(
+        CharacterGearSlot(
+            gear_slot=requirement.gear_slot,
+            current_classification=(
+                GearClassification.GARBAGE if completion == "manual" else GearClassification.SAVAGE
+            ),
+            manually_complete=completion == "manual",
         )
+    )
     regular.session.commit()
     assert assignment(regular.result(), "Head Coffer").recipient.character_name == "Main 7"
 
@@ -441,8 +431,6 @@ def test_completed_savage_slot_is_ineligible(regular: RegularFixture, completion
 def test_not_applicable_is_ineligible(regular: RegularFixture) -> None:
     requirement = regular.requirement(regular.mains[-1], GearSlotCode.HEAD)
     requirement.classification = GearClassification.NOT_APPLICABLE
-    requirement.desired_item = None
-    requirement.desired_item_id = None
     requirement.raid_floor = None
     requirement.raid_floor_id = None
     requirement.loot_type = None
@@ -468,7 +456,6 @@ def test_item_level_and_books_do_not_remove_savage_need(regular: RegularFixture)
             earned=999,
         )
     )
-    requirement.desired_item.item_level = 1
     regular.session.commit()
     assert assignment(regular.result(), "Head Coffer").recipient.character_name == winner.name
 

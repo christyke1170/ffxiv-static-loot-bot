@@ -154,7 +154,7 @@ def confirm_loot_received(
     else:
         row.state = LootAssignmentState.RECEIVED
         if row.loot_type.category is LootCategory.COFFER:
-            _add_inventory(session, recipient_id, row.loot_type.item_id)
+            _add_inventory(session, recipient_id, row.loot_type_id)
         elif row.loot_type.category is LootCategory.AUGMENTATION_MATERIAL:
             _add_material(
                 session,
@@ -170,7 +170,6 @@ def confirm_loot_received(
         session.add(
             LootReceipt(
                 assignment=row,
-                item_id=(row.intended_final_item_id or row.loot_type.item_id),
                 quantity=row.quantity,
             )
         )
@@ -199,7 +198,7 @@ def confirm_coffer_redemption(
     ):
         return row
     recipient_id = row.final_recipient_id or row.intended_character_id
-    _remove_inventory(session, recipient_id, row.loot_type.item_id, 1)
+    _remove_inventory(session, recipient_id, row.loot_type_id, 1)
     if redeemed_correctly:
         _equip_completion_items(session, row, row.confirmations[-1])
         row.state = LootAssignmentState.REDEEMED_CORRECTLY
@@ -238,14 +237,13 @@ def confirm_augmentation_applied(
     requirement = row.intended_bis_set_item
     if requirement is None:
         raise ConfirmationError("assignment has no intended augmentation requirement")
-    if applied_correctly and requirement.base_tome_item_id is None:
-        raise ConfirmationError("assignment has no intended base tome item")
     recipient_id = row.final_recipient_id or row.intended_character_id
-    if applied_correctly and not _owns_item(session, recipient_id, requirement.base_tome_item_id):
-        raise ConfirmationError("intended recipient does not own the required base tome item")
+    if applied_correctly and not _slot_has_category(
+        session, recipient_id, requirement.gear_slot_id, GearClassification.TOME
+    ):
+        raise ConfirmationError("intended recipient's slot is not currently Tome")
     _remove_material(session, recipient_id, requirement.augmentation_material_type_id, 1)
     if applied_correctly:
-        _remove_inventory(session, recipient_id, requirement.base_tome_item_id, 1)
         _equip(session, row)
         row.state = LootAssignmentState.REDEEMED_CORRECTLY
     else:
@@ -346,7 +344,7 @@ def correct_confirmation(
     recipient_id = row.final_recipient_id or row.intended_character_id
     if old and not result:
         if row.loot_type.category is LootCategory.COFFER:
-            _remove_inventory(session, recipient_id, row.loot_type.item_id, 1)
+            _remove_inventory(session, recipient_id, row.loot_type_id, 1)
         elif row.loot_type.category is LootCategory.AUGMENTATION_MATERIAL:
             _remove_material(
                 session,
@@ -399,7 +397,6 @@ def correct_confirmation(
         session.add(
             LootReceipt(
                 assignment=row,
-                item_id=(row.intended_final_item_id or row.loot_type.item_id),
                 quantity=row.quantity,
             )
         )
@@ -622,24 +619,24 @@ def _book(session, character_id, floor_id):
         row.earned += 1
 
 
-def _add_inventory(session, character_id, item_id):
-    if item_id is None:
-        raise ConfirmationError("loot type has no inventory item")
+def _add_inventory(session, character_id, loot_type_id):
     row = session.scalar(
         select(InventoryItem).where(
-            InventoryItem.character_id == character_id, InventoryItem.item_id == item_id
+            InventoryItem.character_id == character_id,
+            InventoryItem.loot_type_id == loot_type_id,
         )
     )
     if row is None:
-        session.add(InventoryItem(character_id=character_id, item_id=item_id, quantity=1))
+        session.add(InventoryItem(character_id=character_id, loot_type_id=loot_type_id, quantity=1))
     else:
         row.quantity += 1
 
 
-def _remove_inventory(session, character_id, item_id, quantity):
+def _remove_inventory(session, character_id, loot_type_id, quantity):
     row = session.scalar(
         select(InventoryItem).where(
-            InventoryItem.character_id == character_id, InventoryItem.item_id == item_id
+            InventoryItem.character_id == character_id,
+            InventoryItem.loot_type_id == loot_type_id,
         )
     )
     if row is None or row.quantity < quantity:
@@ -676,13 +673,13 @@ def _remove_material(session, character_id, material_id, quantity):
     row.quantity -= quantity
 
 
-def _owns_item(session, character_id, item_id):
+def _slot_has_category(session, character_id, gear_slot_id, classification):
     return bool(
         session.scalar(
-            select(InventoryItem.id).where(
-                InventoryItem.character_id == character_id,
-                InventoryItem.item_id == item_id,
-                InventoryItem.quantity > 0,
+            select(CharacterGearSlot.id).where(
+                CharacterGearSlot.character_id == character_id,
+                CharacterGearSlot.gear_slot_id == gear_slot_id,
+                CharacterGearSlot.current_classification == classification,
             )
         )
     )
@@ -690,10 +687,10 @@ def _owns_item(session, character_id, item_id):
 
 def _equip(session, row):
     requirement = row.intended_bis_set_item
-    if requirement is None or row.intended_final_item_id is None:
-        raise ConfirmationError("assignment has no exact intended gear slot and item")
+    if requirement is None:
+        raise ConfirmationError("assignment has no intended gear slot")
     recipient_id = row.final_recipient_id or row.intended_character_id
-    classification = GearClassification(requirement.classification)
+    classification = row.resulting_classification or requirement.classification
     slot = session.scalar(
         select(CharacterGearSlot).where(
             CharacterGearSlot.character_id == recipient_id,
@@ -722,7 +719,7 @@ def _equip_completion_items(session, row, confirmation):
         return
     recipient_id = row.final_recipient_id or row.intended_character_id
     for target in row.completion_items:
-        classification = GearClassification(target.bis_set_item.classification)
+        classification = target.resulting_classification
         slot = session.scalar(
             select(CharacterGearSlot).where(
                 CharacterGearSlot.character_id == recipient_id,
@@ -776,7 +773,7 @@ def _restore_completion_items(session, row, confirmation):
 def _equip_or_inventory(session, row):
     recipient_id = row.final_recipient_id or row.intended_character_id
     if row.loot_type.category is LootCategory.COFFER:
-        _add_inventory(session, recipient_id, row.loot_type.item_id)
+        _add_inventory(session, recipient_id, row.loot_type_id)
     elif row.loot_type.category is LootCategory.AUGMENTATION_MATERIAL:
         _add_material(
             session,

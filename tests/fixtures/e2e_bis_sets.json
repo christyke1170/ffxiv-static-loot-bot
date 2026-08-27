@@ -8,7 +8,7 @@
       "description": "Test-only complete BiS fixture.",
       "items": [
         {"slot": "WEAPON", "desired_item": "Fictional Savage Sword", "classification": "SAVAGE", "floor": 1, "loot_type": "WEAPON", "book_cost": 8},
-        {"slot": "OFFHAND", "desired_item": "Fictional Crafted Shield", "classification": "CRAFTED"},
+        {"slot": "OFFHAND", "desired_item": "Fictional Crafted Shield", "classification": "CRAFTED_EX"},
         {"slot": "HEAD", "desired_item": "Fictional Savage Helm", "classification": "SAVAGE", "floor": 2, "loot_type": "HEAD_COFFER", "book_cost": 4},
         {"slot": "BODY", "desired_item": "Fictional Augmented Armor", "classification": "AUGMENTED_TOME", "base_tome_item": "Fictional Base Armor", "tome_cost": 825, "augmentation_material": "ARMOR_TWINE"},
         {"slot": "HANDS", "classification": "NOT_APPLICABLE"},

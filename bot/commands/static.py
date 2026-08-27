@@ -25,11 +25,11 @@ class Static(commands.Cog):
 
     @group.command(name="create")
     @require_raid_leader(None)
-    async def create(self, interaction, name: str):
+    async def create(self, interaction, name: str, crafted_item_level: int):
         await defer(interaction, ephemeral=True)
         with command_session(self.bot) as session:
             guild_row = guild(session, interaction.guild.id, interaction.guild.name)
-            row = create_static(session, guild_row.id, name)
+            row = create_static(session, guild_row.id, name, crafted_item_level)
         await reply(
             interaction,
             f"Created static **{discord.utils.escape_markdown(row.name)}**.",
@@ -108,12 +108,28 @@ class Static(commands.Cog):
                     f"**{discord.utils.escape_markdown(row.name)}**",
                     f"Active: {row.active}",
                     f"Tier: {active}",
+                    f"Crafted item level: {row.crafted_item_level or 'not configured'}",
                     f"Members: {len(row.members)}",
                     f"Hierarchy: {jobs}",
                     f"Reclear weeks: {weeks}",
                 )
             )
         await reply(interaction, text)
+
+    @group.command(name="item-level", description="Set the selected static's crafted baseline")
+    @require_raid_leader(None)
+    async def item_level(self, interaction, value: int):
+        await defer(interaction, ephemeral=True)
+        with command_session(self.bot) as session:
+            row = selected(session, interaction)
+            from bot.services.admin import set_crafted_item_level
+
+            previous, current = set_crafted_item_level(session, row, value, interaction.user.id)
+        await reply(
+            interaction,
+            f"Crafted item level changed from **{previous or 'not configured'}** to **{current}**.",
+            ephemeral=True,
+        )
 
     @group.command(name="select")
     async def select(self, interaction, static_id: int):

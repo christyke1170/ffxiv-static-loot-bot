@@ -26,6 +26,7 @@ from app.schemas.board import (
 )
 from app.schemas.needs import NeedStatus, SlotNeedResult
 from app.services.gearboard import classify_gear_state
+from app.services.item_level import calculate_roster_item_levels
 from app.services.needs import calculate_character_needs
 
 
@@ -61,8 +62,15 @@ def build_static_gear_board(session: Session, static_id: int) -> StaticGearBoard
         warnings.append(f"Expected 8 active mains; found {len(mains)}.")
     if len(mains) > 8:
         warnings.append("Only the first 8 ordered active mains are displayed.")
+    item_levels = calculate_roster_item_levels(session, static.id)
     players = tuple(
-        _build_player(session, character, static.active_raid_tier_id) for character in mains[:8]
+        _build_player(
+            session,
+            character,
+            static.active_raid_tier_id,
+            item_levels[character.id],
+        )
+        for character in mains[:8]
     )
     return StaticGearBoard(
         static.id,
@@ -86,7 +94,7 @@ def _current_week_number(session: Session, static_id: int) -> int | None:
     return 2 + (count or 0)
 
 
-def _build_player(session: Session, character: Character, tier_id: int) -> BoardPlayer:
+def _build_player(session: Session, character: Character, tier_id: int, item_level) -> BoardPlayer:
     needs = calculate_character_needs(session, character.id, tier_id)
     gear = {
         row.gear_slot_id: row
@@ -101,7 +109,6 @@ def _build_player(session: Session, character: Character, tier_id: int) -> Board
             result.slot.sort_order,
             result.desired_classification,
             result.current_classification,
-            result.desired_item.name if result.desired_item else None,
             result.status,
             display_status(result),
             result.required_raid_floor.floor_number if result.required_raid_floor else None,
@@ -121,13 +128,12 @@ def _build_player(session: Session, character: Character, tier_id: int) -> Board
                 slot.sort_order,
                 None,
                 gear[slot.id].current_classification if slot.id in gear else None,
-                None,
                 NeedStatus.INVALID_CONFIGURATION,
                 (
                     DisplayStatus.NA
                     if slot.code is GearSlotCode.OFFHAND
                     and character.job
-                    and character.job.abbreviation.upper() != "PLD"
+                    and not character.job.uses_offhand
                     else DisplayStatus.NEEDS_REPLACEMENT
                 ),
                 None,
@@ -183,5 +189,7 @@ def _build_player(session: Session, character: Character, tier_id: int) -> Board
         materials,
         needs.complete_slot_count,
         needs.total_applicable_slot_count,
+        item_level.average_item_level,
+        item_level.warnings,
         tuple(needs.configuration_warnings),
     )

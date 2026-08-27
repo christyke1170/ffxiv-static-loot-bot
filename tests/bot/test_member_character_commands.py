@@ -180,6 +180,7 @@ async def test_raid_leader_role_allows_write_command(bot, interaction_factory):
         "create",
         interaction,
         "Leader Created",
+        710,
     )
 
     with bot.session_factory() as session:

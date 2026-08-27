@@ -34,7 +34,6 @@ from app.models.enums import (
     PlannedLootDisposition,
     ReclearWorkflowState,
     WeeklyLootPlanStatus,
-    job_uses_offhand,
 )
 
 
@@ -54,6 +53,7 @@ class Static(Base):
     active_raid_tier_id: Mapped[int | None] = mapped_column(ForeignKey("raid_tiers.id"))
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    crafted_item_level: Mapped[int | None] = mapped_column(Integer)
     guild: Mapped[DiscordGuild] = relationship(back_populates="statics")
     active_raid_tier: Mapped["RaidTier | None"] = relationship(foreign_keys=[active_raid_tier_id])
     members: Mapped[list["StaticMember"]] = relationship(back_populates="static")
@@ -95,6 +95,7 @@ class Job(Base):
     abbreviation: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(30), default="Unknown", nullable=False)
+    uses_offhand: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     characters: Mapped[list["Character"]] = relationship(back_populates="job")
     bis_sets: Mapped[list["BisSet"]] = relationship(back_populates="job")
 
@@ -163,11 +164,17 @@ class GearSlot(Base):
 
 
 class Item(Base):
+    """Named loot/material resource metadata; never an equipment identity."""
+
     __tablename__ = "items"
     id: Mapped[int] = mapped_column(primary_key=True)
-    external_item_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    # Legacy columns are retained only because this resource table is heavily FK-referenced.
+    # Corrected application paths never read or write them.
+    legacy_external_item_id: Mapped[int | None] = mapped_column(
+        "external_item_id", Integer, unique=True
+    )
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
-    item_level: Mapped[int | None] = mapped_column(Integer)
+    legacy_item_level: Mapped[int | None] = mapped_column("item_level", Integer)
 
 
 class LootType(Base):
@@ -246,10 +253,8 @@ class BisSetItem(Base):
     classification: Mapped[GearClassification] = mapped_column(
         Enum(GearClassification), nullable=False
     )
-    desired_item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
     raid_floor_id: Mapped[int | None] = mapped_column(ForeignKey("raid_floors.id"))
     loot_type_id: Mapped[int | None] = mapped_column(ForeignKey("loot_types.id"))
-    base_tome_item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
     tome_cost: Mapped[int | None] = mapped_column(Integer)
     augmentation_material_type_id: Mapped[int | None] = mapped_column(
         ForeignKey("augmentation_material_types.id")
@@ -258,10 +263,8 @@ class BisSetItem(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     bis_set: Mapped[BisSet] = relationship(back_populates="items")
     gear_slot: Mapped[GearSlot] = relationship()
-    desired_item: Mapped[Item | None] = relationship(foreign_keys=[desired_item_id])
     raid_floor: Mapped[RaidFloor | None] = relationship()
     loot_type: Mapped[LootType | None] = relationship()
-    base_tome_item: Mapped[Item | None] = relationship(foreign_keys=[base_tome_item_id])
     augmentation_material_type: Mapped[AugmentationMaterialType | None] = relationship()
 
 
@@ -299,17 +302,28 @@ class CharacterGearSlot(Base):
 
 
 class InventoryItem(Base):
+    """Unequipped category state or a categorized unopened loot resource."""
+
     __tablename__ = "inventory_items"
     __table_args__ = (
-        UniqueConstraint("character_id", "item_id"),
+        UniqueConstraint("character_id", "loot_type_id"),
+        UniqueConstraint("character_id", "gear_slot_id", "classification"),
         CheckConstraint("quantity >= 0", name="nonnegative_quantity"),
+        CheckConstraint(
+            "(loot_type_id IS NOT NULL AND gear_slot_id IS NULL AND classification IS NULL) OR "
+            "(loot_type_id IS NULL AND gear_slot_id IS NOT NULL AND classification IS NOT NULL)",
+            name="inventory_resource_or_category",
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"), nullable=False)
-    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), nullable=False)
+    loot_type_id: Mapped[int | None] = mapped_column(ForeignKey("loot_types.id"))
+    gear_slot_id: Mapped[int | None] = mapped_column(ForeignKey("gear_slots.id"))
+    classification: Mapped[GearClassification | None] = mapped_column(Enum(GearClassification))
     quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     character: Mapped[Character] = relationship(back_populates="inventory_items")
-    item: Mapped[Item] = relationship()
+    loot_type: Mapped[LootType | None] = relationship()
+    gear_slot: Mapped[GearSlot | None] = relationship()
 
 
 class CharacterAugmentationInventory(Base):
@@ -572,8 +586,8 @@ class LootPlan(Base):
 class LootPlanRun(Base):
     __tablename__ = "loot_plan_runs"
     __table_args__ = (
-        UniqueConstraint("loot_plan_id", "run_number"),
-        UniqueConstraint("loot_plan_id", "name"),
+        UniqueConstraint("loot_plan_id", "run_number", name="uq_loot_plan_runs_plan_run_number"),
+        UniqueConstraint("loot_plan_id", "name", name="uq_loot_plan_runs_plan_name"),
         UniqueConstraint("id", "loot_plan_id", name="uq_loot_plan_runs_id_plan"),
         CheckConstraint("run_number > 0", name="positive_run_number"),
     )
@@ -647,7 +661,10 @@ class LootAssignment(Base):
     loot_type_id: Mapped[int] = mapped_column(ForeignKey("loot_types.id"), nullable=False)
     intended_character_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
     intended_bis_set_item_id: Mapped[int | None] = mapped_column(ForeignKey("bis_set_items.id"))
-    intended_final_item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
+    gear_slot_id: Mapped[int | None] = mapped_column(ForeignKey("gear_slots.id"))
+    resulting_classification: Mapped[GearClassification | None] = mapped_column(
+        Enum(GearClassification)
+    )
     suggested_recipient_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
     final_recipient_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
     backup_recipient_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
@@ -679,7 +696,7 @@ class LootAssignment(Base):
         foreign_keys=[intended_character_id]
     )
     intended_bis_set_item: Mapped[BisSetItem | None] = relationship()
-    intended_final_item: Mapped[Item | None] = relationship()
+    gear_slot: Mapped[GearSlot | None] = relationship()
     suggested_recipient: Mapped[Character | None] = relationship(
         foreign_keys=[suggested_recipient_id]
     )
@@ -733,7 +750,7 @@ class ConfirmedReclearMaterialGrant(Base):
 class LootAssignmentCompletionItem(Base):
     """One gear slot completed by a loot assignment.
 
-    Most assignments have one target. A PLD weapon coffer has sword and shield
+    Most assignments have one target. An offhand-capable job's weapon coffer has two
     targets while remaining one physical drop and one receipt/redemption workflow.
     """
 
@@ -750,15 +767,14 @@ class LootAssignmentCompletionItem(Base):
         ForeignKey("loot_assignments.id"), nullable=False
     )
     bis_set_item_id: Mapped[int] = mapped_column(ForeignKey("bis_set_items.id"), nullable=False)
-    intended_final_item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), nullable=False)
-    previous_gear_item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
+    resulting_classification: Mapped[GearClassification] = mapped_column(
+        Enum(GearClassification), nullable=False
+    )
     previous_gear_classification: Mapped[GearClassification | None] = mapped_column(
         Enum(GearClassification)
     )
     assignment: Mapped[LootAssignment] = relationship(back_populates="completion_items")
     bis_set_item: Mapped[BisSetItem] = relationship()
-    intended_final_item: Mapped[Item] = relationship(foreign_keys=[intended_final_item_id])
-    previous_gear_item: Mapped[Item | None] = relationship(foreign_keys=[previous_gear_item_id])
 
 
 class LootConfirmation(Base):
@@ -777,7 +793,6 @@ class LootConfirmation(Base):
     )
     note: Mapped[str | None] = mapped_column(Text)
     supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("loot_confirmations.id"))
-    previous_gear_item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
     previous_gear_classification: Mapped[GearClassification | None] = mapped_column(
         Enum(GearClassification)
     )
@@ -821,13 +836,11 @@ class LootReceipt(Base):
     loot_assignment_id: Mapped[int] = mapped_column(
         ForeignKey("loot_assignments.id"), unique=True, nullable=False
     )
-    item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
     quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     assignment: Mapped[LootAssignment] = relationship(back_populates="receipt")
-    item: Mapped[Item | None] = relationship()
 
 
 class PriorityRule(Base):
@@ -894,34 +907,29 @@ def _validate_bis_requirement(item: BisSetItem) -> None:
         raise ValueError("book_cost must be nonnegative")
     if item.classification == GearClassification.NOT_APPLICABLE:
         fields = (
-            item.desired_item,
-            item.desired_item_id,
             item.raid_floor,
             item.raid_floor_id,
             item.loot_type,
             item.loot_type_id,
-            item.base_tome_item,
-            item.base_tome_item_id,
             item.tome_cost,
             item.augmentation_material_type,
             item.augmentation_material_type_id,
             item.book_cost,
         )
         if any(value is not None for value in fields):
-            raise ValueError("NOT_APPLICABLE cannot define an item requirement")
+            raise ValueError("NOT_APPLICABLE cannot define a loot requirement")
     slot_code = getattr(item.gear_slot, "code", None)
-    job_abbreviation = getattr(getattr(item.bis_set, "job", None), "abbreviation", None)
-    if slot_code is GearSlotCode.OFFHAND and job_abbreviation:
-        uses_offhand = job_uses_offhand(job_abbreviation)
+    job = getattr(item.bis_set, "job", None)
+    if slot_code is GearSlotCode.OFFHAND and job is not None:
+        uses_offhand = job.uses_offhand
         if uses_offhand and item.classification is GearClassification.NOT_APPLICABLE:
-            raise ValueError("PLD OFFHAND must define an applicable item requirement")
+            raise ValueError("offhand-capable jobs must define an applicable Offhand requirement")
         if not uses_offhand and item.classification is not GearClassification.NOT_APPLICABLE:
-            raise ValueError(f"{job_abbreviation} OFFHAND must be NOT_APPLICABLE")
+            raise ValueError(f"{job.abbreviation} OFFHAND must be NOT_APPLICABLE")
     if item.classification == GearClassification.AUGMENTED_TOME and (
-        (item.base_tome_item is None and item.base_tome_item_id is None)
-        or (item.augmentation_material_type is None and item.augmentation_material_type_id is None)
+        item.augmentation_material_type is None and item.augmentation_material_type_id is None
     ):
-        raise ValueError("AUGMENTED_TOME requires base_tome_item and augmentation_material_type")
+        raise ValueError("AUGMENTED_TOME requires an augmentation_material_type")
     set_tier = _tier_id(item.bis_set)
     for reference, field in (
         (item.raid_floor, "raid_floor"),

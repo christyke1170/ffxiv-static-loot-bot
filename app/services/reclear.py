@@ -281,7 +281,6 @@ def load_loot_board(session: Session, static_id: int, today: date | None = None)
                 joinedload(LootAssignment.suggested_recipient),
                 joinedload(LootAssignment.final_recipient),
                 joinedload(LootAssignment.backup_recipient),
-                joinedload(LootAssignment.intended_final_item),
                 joinedload(LootAssignment.intended_bis_set_item),
                 selectinload(LootAssignment.confirmations),
             )
@@ -313,7 +312,11 @@ def load_loot_board(session: Session, static_id: int, today: date | None = None)
             _name(row.backup_recipient),
             row.state,
             row.intended_bis_set_item.gear_slot.display_name if row.intended_bis_set_item else "—",
-            row.intended_final_item.name if row.intended_final_item else "—",
+            (
+                row.resulting_classification.value
+                if row.resulting_classification is not None
+                else "—"
+            ),
             _name(row.suggested_recipient),
             _name(row.final_recipient),
             row.hierarchy_position,

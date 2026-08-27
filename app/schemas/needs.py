@@ -9,7 +9,6 @@ from app.models import (
     Character,
     GearClassification,
     GearSlot,
-    Item,
     LootType,
     RaidFloor,
     RaidTier,
@@ -27,7 +26,7 @@ class NeedStatus(StrEnum):
     NEEDS_BASE_TOME_ITEM = "NEEDS_BASE_TOME_ITEM"
     NEEDS_AUGMENTATION = "NEEDS_AUGMENTATION"
     READY_TO_AUGMENT = "READY_TO_AUGMENT"
-    NEEDS_EXACT_ITEM = "NEEDS_EXACT_ITEM"
+    NEEDS_CATEGORY = "NEEDS_CATEGORY"
     INVALID_CONFIGURATION = "INVALID_CONFIGURATION"
 
 
@@ -45,12 +44,10 @@ class SlotNeedResult:
     bis_set: BisSet
     slot: GearSlot
     desired_classification: GearClassification | None
-    desired_item: Item | None
     current_classification: GearClassification | None
     status: NeedStatus
     required_raid_floor: RaidFloor | None = None
     required_loot_type: LootType | None = None
-    required_base_tome_item: Item | None = None
     base_tome_item_owned: bool = False
     required_augmentation_material: AugmentationMaterialType | None = None
     enough_augmentation_material: bool = False
@@ -112,7 +109,6 @@ class BookRequirement:
 @dataclass(slots=True)
 class OwnedCofferAvailability:
     loot_type: LootType
-    item: Item
     units_owned: int
     units_allocated: int
     slots: list[GearSlot]

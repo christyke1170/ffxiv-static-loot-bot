@@ -45,7 +45,7 @@ def gear_state(session):
     material = AugmentationMaterialType(raid_tier=tier, code="TWINE", name="Fictional Twine")
     static = Static(guild=guild, name="Fictional Static", active_raid_tier=tier)
     member = StaticMember(static=static, discord_user_id=10, display_name="Melon")
-    job = Job(abbreviation="PLD", name="Paladin", role="Tank")
+    job = Job(abbreviation="PLD", name="Paladin", role="Tank", uses_offhand=True)
     character = Character(
         static_member=member, job=job, name="Melon Hero", world="Sample", kind=CharacterKind.MAIN
     )
@@ -57,45 +57,46 @@ def gear_state(session):
 
 def test_current_classification_persists_separately(session, gear_state):
     static, character, slot, *_ = gear_state
-    row = set_gear(session, static, character, slot, GearClassification.CRAFTED, 99)
+    row = set_gear(session, static, character, slot, GearClassification.CRAFTED_EX, 99)
     session.commit()
     session.expire_all()
     persisted = session.get(CharacterGearSlot, row.id)
-    assert persisted.current_classification is GearClassification.CRAFTED
+    assert persisted.current_classification is GearClassification.CRAFTED_EX
     assert not hasattr(persisted, "item_id")
 
 
-def test_ex_weapon_is_only_valid_for_weapon_slot(session, gear_state):
+def test_crafted_ex_is_valid_for_weapon_and_offhand(session, gear_state):
     static, character, *_ = gear_state
     weapon = GearSlot(code=GearSlotCode.WEAPON, display_name="Weapon", sort_order=0)
     offhand = GearSlot(code=GearSlotCode.OFFHAND, display_name="Offhand", sort_order=2)
     session.add_all([weapon, offhand])
     session.flush()
-    row = set_gear(session, static, character, weapon, GearClassification.EX_WEAPON, 99)
-    assert row.current_classification is GearClassification.EX_WEAPON
-    with pytest.raises(ValueError, match="EX_WEAPON is only valid"):
-        set_gear(session, static, character, offhand, GearClassification.EX_WEAPON, 99)
+    row = set_gear(session, static, character, weapon, GearClassification.CRAFTED_EX, 99)
+    assert row.current_classification is GearClassification.CRAFTED_EX
+    assert (
+        set_gear(
+            session, static, character, offhand, GearClassification.CRAFTED_EX, 99
+        ).current_classification
+        is GearClassification.CRAFTED_EX
+    )
 
 
-@pytest.mark.parametrize("slot", list(GearSlotCode))
-def test_current_state_import_rejects_ex_weapon_outside_weapon(session, gear_state, slot):
-    if slot is GearSlotCode.WEAPON:
-        pytest.skip("EX_WEAPON is valid for Weapon")
+@pytest.mark.parametrize("slot", [GearSlotCode.HEAD])
+def test_current_state_import_accepts_crafted_ex_for_applicable_slots(session, gear_state, slot):
     static, character, *_ = gear_state
     data = import_data()
     data["characters"][0]["gear_slots"] = [
         {
             "slot": slot.name,
-            "current_classification": "EX_WEAPON",
+            "current_classification": "CRAFTED_EX",
         }
     ]
-    with pytest.raises(ImportValidationError, match="EX_WEAPON is only valid for Weapon"):
-        import_current_state(session, static, data, 99, dry_run=True)
+    assert import_current_state(session, static, data, 99, dry_run=True).gear_slots == 1
 
 
 def test_gear_set_change_clears_manual_completion(session, gear_state):
     static, character, slot, *_ = gear_state
-    row = set_gear(session, static, character, slot, GearClassification.CRAFTED, 99)
+    row = set_gear(session, static, character, slot, GearClassification.CRAFTED_EX, 99)
     row.manually_complete = True
     set_gear(session, static, character, slot, GearClassification.SAVAGE, 99)
     assert row.current_classification is GearClassification.SAVAGE
@@ -124,11 +125,12 @@ def test_gear_clear_removes_state_but_retains_audit(session, gear_state):
 
 def test_inventory_quantity_update_and_zero_removes(session, gear_state):
     static, character, *_ = gear_state
-    row = set_inventory(session, static, character, "Potion", 4, 99)
+    slot = gear_state[2]
+    row = set_inventory(session, static, character, slot, GearClassification.SAVAGE, 4, 99)
     assert row.quantity == 4
-    set_inventory(session, static, character, "Potion", 2, 99)
+    set_inventory(session, static, character, slot, GearClassification.SAVAGE, 2, 99)
     assert row.quantity == 2
-    set_inventory(session, static, character, "Potion", 0, 99)
+    set_inventory(session, static, character, slot, GearClassification.SAVAGE, 0, 99)
     session.flush()
     assert session.scalar(select(InventoryItem)) is None
 
@@ -155,9 +157,7 @@ def test_set_available_books_preserves_accounting_creates_rows_and_audits(sessio
     session.flush()
     session.query(AuditLog).delete()
 
-    rows = set_available_books(
-        session, static, character, {first.id: 5, second.id: 0}, actor_id=99
-    )
+    rows = set_available_books(session, static, character, {first.id: 5, second.id: 0}, actor_id=99)
     session.commit()
 
     assert [(row.earned, row.spent, row.manual_adjustment, row.available) for row in rows] == [
@@ -203,11 +203,14 @@ def test_set_available_books_validation_is_atomic(session, gear_state, bad):
         0,
         2,
     )
-    assert session.scalar(
-        select(CharacterFloorBookBalance).where(
-            CharacterFloorBookBalance.raid_floor_id == second.id
+    assert (
+        session.scalar(
+            select(CharacterFloorBookBalance).where(
+                CharacterFloorBookBalance.raid_floor_id == second.id
+            )
         )
-    ) is None
+        is None
+    )
 
 
 @pytest.mark.parametrize("resource", ["inventory", "material", "earned", "spent"])
@@ -215,7 +218,9 @@ def test_negative_quantities_rejected(session, gear_state, resource):
     static, character, _, floor, material = gear_state
     with pytest.raises(ValueError, match="negative"):
         if resource == "inventory":
-            set_inventory(session, static, character, "Bad", -1, 99)
+            set_inventory(
+                session, static, character, gear_state[2], GearClassification.SAVAGE, -1, 99
+            )
         elif resource == "material":
             set_augmentation_material(session, static, character, material, -1, 99)
         elif resource == "earned":
@@ -233,10 +238,10 @@ def import_data():
                 "gear_slots": [
                     {
                         "slot": "HEAD",
-                        "current_classification": "CRAFTED",
+                        "current_classification": "CRAFTED_EX",
                     }
                 ],
-                "inventory_items": [{"item": "Imported Token", "quantity": 2}],
+                "inventory_items": [{"slot": "HEAD", "classification": "SAVAGE", "quantity": 2}],
                 "books": [{"floor": 1, "earned": 5, "spent": 1, "manual_adjustment": 2}],
                 "augmentation_materials": [{"material": "TWINE", "quantity": 3}],
             }
@@ -280,7 +285,7 @@ def test_gear_only_current_state_import_does_not_require_active_tier(session, ge
     assert counts.gear_slots == 1
     assert (
         session.scalar(select(CharacterGearSlot)).current_classification
-        is GearClassification.CRAFTED
+        is GearClassification.CRAFTED_EX
     )
 
 
@@ -322,15 +327,21 @@ def test_obsolete_current_gear_identity_is_rejected_before_writes(session, gear_
     assert session.scalar(select(CharacterGearSlot)) is None
 
 
-def test_non_pld_offhand_is_rejected_by_service_and_import(session, gear_state):
+def test_configured_non_offhand_state_is_enforced_by_service_and_import(session, gear_state):
     static, character, *_ = gear_state
-    character.job.abbreviation = "WAR"
+    character.job.uses_offhand = False
     offhand = GearSlot(code=GearSlotCode.OFFHAND, display_name="Offhand", sort_order=2)
     session.add(offhand)
     session.flush()
-    with pytest.raises(ValueError, match="N/A for non-PLD"):
-        set_gear(session, static, character, offhand, GearClassification.CRAFTED, 99)
+    with pytest.raises(ValueError, match="N/A for this job"):
+        set_gear(session, static, character, offhand, GearClassification.CRAFTED_EX, 99)
     data = import_data()
-    data["characters"][0]["gear_slots"] = [{"slot": "OFFHAND", "current_classification": "CRAFTED"}]
-    with pytest.raises(ImportValidationError, match="Offhand is N/A for non-PLD"):
+    data["characters"][0]["gear_slots"] = [
+        {"slot": "OFFHAND", "current_classification": "CRAFTED_EX"}
+    ]
+    with pytest.raises(ImportValidationError, match="contradicts configured Offhand"):
         import_current_state(session, static, data, 99, dry_run=True)
+    data["characters"][0]["gear_slots"] = [
+        {"slot": "OFFHAND", "current_classification": "NOT_APPLICABLE"}
+    ]
+    assert import_current_state(session, static, data, 99, dry_run=True).gear_slots == 1
