@@ -94,6 +94,8 @@ class RegularLootAssignment:
     recipient_designation: CharacterKind | None
     explanation: str
     fairness: MaterialFairnessContext | None = None
+    intended_bis_set_item_id: int | None = None
+    intended_final_item_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +216,8 @@ class SplitSavageAssignment:
     recipient_job: str | None
     recipient_designation: CharacterKind | None
     explanation: str
+    intended_bis_set_item_id: int | None = None
+    intended_final_item_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -406,6 +406,12 @@ def _score_split_candidate(
                     designation,
                     f"Assigned to the eligible {designation.value.title()} {participant.job} "
                     "with the highest applicable priority.",
+                    _planned_bis_item_id(
+                        needs[participant.character_id], floor, drop.loot_type_code
+                    ),
+                    _planned_bis_item_final_id(
+                        needs[participant.character_id], floor, drop.loot_type_code
+                    ),
                 )
             )
             if designation is CharacterKind.MAIN:
@@ -1198,6 +1204,35 @@ def _assign_drop(
         participant.job,
         CharacterKind.MAIN,
         f"{winner.name} is the highest-priority participating Main who still needs this drop.",
+        intended_bis_set_item_id=_planned_bis_item_id(needs[winner.id], floor, drop.loot_type_code),
+        intended_final_item_id=_planned_bis_item_final_id(
+            needs[winner.id], floor, drop.loot_type_code
+        ),
+    )
+
+
+def _planned_bis_item_id(result, floor, loot_type_code):
+    item = _planned_bis_item_row(result, floor, loot_type_code)
+    return item.id if item is not None else None
+
+
+def _planned_bis_item_final_id(result, floor, loot_type_code):
+    item = _planned_bis_item_row(result, floor, loot_type_code)
+    return item.desired_item_id if item is not None else None
+
+
+def _planned_bis_item_row(result, floor, loot_type_code):
+    return next(
+        (
+            next(item for item in need.bis_set.items if item.gear_slot_id == need.slot.id)
+            for need in result.slot_results
+            if need.status is NeedStatus.NEEDS_SAVAGE_DROP
+            and need.required_raid_floor is not None
+            and need.required_raid_floor.id == floor.id
+            and need.required_loot_type is not None
+            and need.required_loot_type.code == loot_type_code
+        ),
+        None,
     )
 
 

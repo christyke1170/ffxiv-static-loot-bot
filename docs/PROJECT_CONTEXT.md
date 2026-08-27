@@ -135,6 +135,18 @@
   without recalculation; displays include rosters, assignments, materials, free rolls, and Alt weapon
   proposals. Stale and unverifiable plans show warnings. DRAFT and READY plans can be cancelled through
   a confirmation view. Discord planning commands do not apply loot or advance the week.
+- Discord confirmation requires an explicit authorized raid-leader or administrator approval. The
+  confirmation workflow applies the persisted plan exactly; stale or unverifiable plans cannot be
+  confirmed. Keep Plan performs no mutation, and repeated confirmation is idempotent. Actual-drop
+  deviations remain unsupported.
+- Confirming a READY persisted plan is a Discord-independent, atomic operation. It revalidates the
+  authoritative source snapshot and next-week identity before applying persisted recipients only;
+  stale or unverifiable plans cannot apply. Savage assignments use exact persisted BiS-slot identities,
+  Twine and Glaze create one idempotent grant and inventory increment, and paired Alt weapon proposals
+  directly set the Alt Weapon slot to AUGMENTED_TOME without intermediate inventory. Confirmation awards
+  earned books without changing spent or manual adjustments, records one full-tier clear per participant,
+  closes and advances the target reclear week, marks the plan APPLIED, and writes one plan-level audit
+  event. Repeated or concurrent confirmation is idempotent and cannot duplicate credits or advancement.
 - The complete Split comparison order is Main Savage vector, Twine score, Glaze score, completed-DPS
   carry balance, useful Alt Savage total, Alt Savage vector, useful paired Alt weapon upgrades, then
   canonical candidate order. Books remain excluded from all Split planning scores and eligibility.

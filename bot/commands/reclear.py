@@ -28,7 +28,12 @@ from app.services import (
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
 from bot.views.confirmation import first_confirmation_view
-from bot.views.loot_plan import LootPlanCancelView, LootPlanView
+from bot.views.loot_plan import (
+    LootPlanCancelView,
+    LootPlanConfirmationView,
+    LootPlanView,
+    confirmation_preview,
+)
 from bot.views.reclear import ConfirmActionView, SetupPreviewView, roster_text
 
 
@@ -125,6 +130,25 @@ class Reclear(commands.Cog):
             return
         await interaction.followup.send(
             view=LootPlanView(self.bot, result, interaction.user.id), ephemeral=True
+        )
+
+    @group.command(
+        name="plan-confirm", description="Review and confirm the active generated loot plan"
+    )
+    @require_raid_leader(None)
+    async def plan_confirm(self, interaction):
+        await defer(interaction, ephemeral=True)
+        try:
+            with command_session(self.bot) as session:
+                static = selected(session, interaction)
+                result = load_active_loot_plan(session, static.id)
+        except (ActiveLootPlanConflict, PersistedLootPlanNotFound, ValueError) as error:
+            await reply(interaction, f"Unable to open plan confirmation: {error}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            content=confirmation_preview(result),
+            view=LootPlanConfirmationView(self.bot, result, interaction.user.id),
+            ephemeral=True,
         )
 
     @group.command(name="plan-cancel", description="Cancel the active generated loot plan")

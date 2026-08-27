@@ -363,6 +363,8 @@ def _populate_plan(session, plan, proposal, tier_id):
                 raid_floor=floor,
                 loot_type=loot_type,
                 intended_character_id=(row.recipient.character_id if row.recipient else None),
+                intended_bis_set_item_id=getattr(row, "intended_bis_set_item_id", None),
+                intended_final_item_id=getattr(row, "intended_final_item_id", None),
                 recipient_designation=row.recipient_designation,
                 expected_drop_instance=1,
                 disposition=row.disposition,
