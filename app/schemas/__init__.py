@@ -15,6 +15,7 @@ from app.schemas.loot_planning import (
     RegularPlanParticipant,
     SplitCandidateRejection,
     SplitCarrySignature,
+    SplitMaterialAssignment,
     SplitRejectionCode,
     SplitRoleCounts,
     SplitRosterCandidate,
@@ -26,6 +27,7 @@ from app.schemas.loot_planning import (
     SplitSavagePlanResult,
     SplitSavageRunnerUp,
     SplitSavageRunPlan,
+    SplitWeaponUpgradeAssignment,
 )
 from app.schemas.needs import (
     AugmentationNeed,
@@ -83,6 +85,8 @@ __all__ = [
     "SplitSavagePlanResult",
     "SplitSavageRunnerUp",
     "SplitSavageRunPlan",
+    "SplitMaterialAssignment",
+    "SplitWeaponUpgradeAssignment",
     "LootPlanGenerationError",
     "PlannedDropResult",
     "PlanWarning",

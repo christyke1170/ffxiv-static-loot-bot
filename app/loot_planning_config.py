@@ -92,3 +92,6 @@ REGULAR_TRACKED_DROPS: tuple[RegularTrackedDrop, ...] = (
         4, "WEAPON_COFFER", "Weapon Coffer", LootCategory.COFFER, GearSlotCode.WEAPON
     ),
 )
+
+SPLIT_WEAPON_TOMESTONE_FLOOR = 2
+SPLIT_WEAPON_AUGMENT_FLOOR = 3

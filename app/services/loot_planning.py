@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.loot_planning_config import (
     REGULAR_JOB_PRIORITY,
     REGULAR_TRACKED_DROPS,
+    SPLIT_WEAPON_AUGMENT_FLOOR,
+    SPLIT_WEAPON_TOMESTONE_FLOOR,
     RegularTrackedDrop,
     is_supported_combat_job,
     is_supported_regular_job,
@@ -16,9 +18,13 @@ from app.loot_planning_config import (
 )
 from app.models import (
     Character,
+    CharacterGearSlot,
     CharacterKind,
     ConfirmedReclearMaterialGrant,
     FloorLootRule,
+    GearClassification,
+    GearSlot,
+    GearSlotCode,
     LootCategory,
     PlannedLootDisposition,
     RaidFloor,
@@ -42,6 +48,7 @@ from app.schemas.loot_planning import (
     RegularPlanParticipant,
     SplitCandidateRejection,
     SplitCarrySignature,
+    SplitMaterialAssignment,
     SplitRejectionCode,
     SplitRoleCounts,
     SplitRosterCandidate,
@@ -53,6 +60,7 @@ from app.schemas.loot_planning import (
     SplitSavagePlanResult,
     SplitSavageRunnerUp,
     SplitSavageRunPlan,
+    SplitWeaponUpgradeAssignment,
 )
 from app.schemas.needs import CharacterNeedsResult, NeedStatus
 from app.services.needs import calculate_characters_needs
@@ -244,6 +252,8 @@ def plan_split_savage_loot(session: Session, static_id: int) -> SplitSavagePlanR
             for participant in run.participants
         )
         needs = calculate_characters_needs(session, character_ids, tier.id, include_books=False)
+        grant_counts = _confirmed_grant_counts(session, tier.id, character_ids)
+        weapon_classifications = _weapon_classifications(session, character_ids)
         issues = list(roster_result.warnings)
         for _participant_id, result in needs.items():
             if result.selected_bis_set is None:
@@ -255,7 +265,9 @@ def plan_split_savage_loot(session: Session, static_id: int) -> SplitSavagePlanR
                     )
                 )
         planned = [
-            _score_split_candidate(candidate, drops, needs)
+            _score_split_candidate(
+                candidate, drops, needs, tier, grant_counts, weapon_classifications
+            )
             for candidate in roster_result.candidates
         ]
         ordered = sorted(planned, key=lambda candidate: candidate.comparison_key, reverse=True)
@@ -351,6 +363,9 @@ def _score_split_candidate(
     candidate: SplitRosterCandidate,
     drops: tuple[tuple[RegularTrackedDrop, tuple[RaidFloor, FloorLootRule]], ...],
     needs: dict[int, CharacterNeedsResult],
+    tier: RaidTier,
+    grant_counts: Counter[tuple[int, int]],
+    weapon_classifications: dict[int, str | None],
 ) -> SplitSavagePlanCandidate:
     remaining = {character_id: _savage_need_keys(result) for character_id, result in needs.items()}
     assignments: dict[str, list[SplitSavageAssignment]] = {"Split Run A": [], "Split Run B": []}
@@ -398,13 +413,23 @@ def _score_split_candidate(
                 alt_counts[participant.job] += 1
     main_vector = tuple(main_counts[job] for job in REGULAR_JOB_PRIORITY)
     alt_vector = tuple(alt_counts[job] for job in REGULAR_JOB_PRIORITY)
+    twine_assignments, twine_score = _assign_split_material(
+        candidate, needs, tier, "ARMOR_TWINE", grant_counts
+    )
+    glaze_assignments, glaze_score = _assign_split_material(
+        candidate, needs, tier, "ACCESSORY_GLAZE", grant_counts
+    )
+    weapon_upgrades = _assign_split_weapon_upgrades(candidate, tier, weapon_classifications)
     carry_signature = _carry_signature(candidate, assignments, remaining)
     conflicts = _avoided_conflicts(candidate, assignments)
     comparison_key = (
         main_vector,
+        twine_score,
+        glaze_score,
         carry_signature.separated_completed_dps,
         sum(alt_vector),
         alt_vector,
+        sum(upgrade.disposition is PlannedLootDisposition.ASSIGNED for upgrade in weapon_upgrades),
         -candidate.partition_ordinal,
     )
     return SplitSavagePlanCandidate(
@@ -418,6 +443,12 @@ def _score_split_candidate(
         alt_vector,
         comparison_key,
         tuple(conflicts),
+        twine_assignments,
+        glaze_assignments,
+        weapon_upgrades,
+        twine_score,
+        glaze_score,
+        sum(upgrade.disposition is PlannedLootDisposition.ASSIGNED for upgrade in weapon_upgrades),
     )
 
 
@@ -455,6 +486,198 @@ def _select_split_recipient(
                 ),
             ), designation
     return None
+
+
+def _assign_split_material(
+    candidate: SplitRosterCandidate,
+    needs: dict[int, CharacterNeedsResult],
+    tier: RaidTier,
+    material_code: str,
+    grant_counts: Counter[tuple[int, int]],
+) -> tuple[tuple[SplitMaterialAssignment, ...], tuple[int, ...]]:
+    material = next(
+        (row for row in tier.augmentation_material_types if row.code == material_code), None
+    )
+    floor_number = 2 if material_code == "ACCESSORY_GLAZE" else 3
+    floor = next((row for row in tier.floors if row.floor_number == floor_number), None)
+    if material is None or floor is None:
+        return tuple(
+            _free_material_assignment(candidate, run.name, floor_number, material_code, floor)
+            for run in (candidate.run_a, candidate.run_b)
+        ), (0, 0)
+    simulated_counts = Counter(
+        {key: count for key, count in grant_counts.items() if key[1] == material.id}
+    )
+    results: list[SplitMaterialAssignment] = []
+    useful_bits: list[int] = []
+    fairness_values: list[int] = []
+    for run in (candidate.run_a, candidate.run_b):
+        eligible = [
+            participant
+            for participant in run.participants
+            if participant.designation is CharacterKind.MAIN
+            and _remaining_material_need(needs.get(participant.character_id), material.id) > 0
+        ]
+        winner = (
+            min(
+                eligible,
+                key=lambda participant: (
+                    simulated_counts[(participant.character_id, material.id)],
+                    -_remaining_material_need(needs.get(participant.character_id), material.id),
+                    regular_job_priority_rank(participant.job),
+                    participant.roster_order,
+                    participant.character_id,
+                ),
+            )
+            if eligible
+            else None
+        )
+        if winner is None:
+            results.append(
+                _free_material_assignment(candidate, run.name, floor_number, material.name, floor)
+            )
+            useful_bits.append(0)
+            fairness_values.extend((0, 0, 0, 0))
+            continue
+        count = simulated_counts[(winner.character_id, material.id)]
+        remaining_need = _remaining_material_need(needs.get(winner.character_id), material.id)
+        results.append(
+            SplitMaterialAssignment(
+                candidate.partition_ordinal,
+                run.name,
+                floor_number,
+                floor.name,
+                material.name,
+                PlannedLootDisposition.ASSIGNED,
+                winner,
+                winner.job,
+                CharacterKind.MAIN,
+                count,
+                remaining_need,
+                f"Assigned to the eligible Main with {count} confirmed grants and "
+                f"{remaining_need} remaining need.",
+            )
+        )
+        simulated_counts[(winner.character_id, material.id)] += 1
+        useful_bits.append(1)
+        fairness_values.extend(
+            (
+                -count,
+                remaining_need,
+                -regular_job_priority_rank(winner.job),
+                -winner.roster_order,
+            )
+        )
+    return tuple(results), (sum(useful_bits), *fairness_values)
+
+
+def _remaining_material_need(result: CharacterNeedsResult | None, material_id: int) -> int:
+    if result is None:
+        return 0
+    return next(
+        (
+            need.additional_units_needed
+            for need in result.augmentation_needs
+            if need.material.id == material_id
+        ),
+        0,
+    )
+
+
+def _free_material_assignment(
+    candidate: SplitRosterCandidate,
+    run_name: str,
+    floor_number: int,
+    label: str,
+    floor: RaidFloor | None,
+) -> SplitMaterialAssignment:
+    return SplitMaterialAssignment(
+        candidate.partition_ordinal,
+        run_name,
+        floor_number,
+        floor.name if floor is not None else f"Floor {floor_number}",
+        label,
+        PlannedLootDisposition.FREE_ROLL,
+        None,
+        None,
+        None,
+        0,
+        0,
+        f"No participating Main has remaining need for {label}.",
+    )
+
+
+def _assign_split_weapon_upgrades(
+    candidate: SplitRosterCandidate,
+    tier: RaidTier,
+    weapon_classifications: dict[int, str | None],
+) -> tuple[SplitWeaponUpgradeAssignment, ...]:
+    floors = {floor.floor_number: floor for floor in tier.floors}
+    tomestone_floor = floors.get(2)
+    augment_floor = floors.get(3)
+    results = []
+    for run in (candidate.run_a, candidate.run_b):
+        eligible = [
+            participant
+            for participant in run.participants
+            if participant.designation is CharacterKind.ALT
+            and _alt_weapon_is_eligible(weapon_classifications.get(participant.character_id))
+        ]
+        winner = (
+            min(
+                eligible,
+                key=lambda participant: (
+                    regular_job_priority_rank(participant.job),
+                    participant.roster_order,
+                    participant.character_id,
+                ),
+            )
+            if eligible
+            else None
+        )
+        results.append(
+            SplitWeaponUpgradeAssignment(
+                candidate.partition_ordinal,
+                run.name,
+                winner,
+                winner.job if winner is not None else None,
+                CharacterKind.ALT if winner is not None else None,
+                weapon_classifications.get(winner.character_id) if winner else None,
+                SPLIT_WEAPON_TOMESTONE_FLOOR,
+                tomestone_floor.name if tomestone_floor else "Floor 2",
+                SPLIT_WEAPON_AUGMENT_FLOOR,
+                augment_floor.name if augment_floor else "Floor 3",
+                PlannedLootDisposition.ASSIGNED if winner else PlannedLootDisposition.FREE_ROLL,
+                (
+                    f"Paired Weapon Tomestone and Weapon Augment assigned to eligible Alt "
+                    f"{winner.job}."
+                    if winner
+                    else "All participating Alts have Savage or Augmented Tome weapons."
+                ),
+            )
+        )
+    return tuple(results)
+
+
+def _alt_weapon_is_eligible(classification: str | None) -> bool:
+    return classification not in {
+        GearClassification.SAVAGE.value,
+        GearClassification.AUGMENTED_TOME.value,
+    }
+
+
+def _weapon_classifications(
+    session: Session, character_ids: tuple[int, ...]
+) -> dict[int, str | None]:
+    rows = session.execute(
+        select(CharacterGearSlot.character_id, CharacterGearSlot.current_classification)
+        .join(CharacterGearSlot.gear_slot)
+        .where(
+            CharacterGearSlot.character_id.in_(character_ids),
+            GearSlot.code == GearSlotCode.WEAPON,
+        )
+    )
+    return {character_id: classification.value for character_id, classification in rows}
 
 
 def _carry_signature(
@@ -527,6 +750,9 @@ def _runner_up(candidate: SplitSavagePlanCandidate) -> SplitSavageRunnerUp:
         candidate.carry_balance_signature,
         candidate.total_useful_alt_assignments,
         candidate.alt_assignment_vector,
+        candidate.twine_score,
+        candidate.glaze_score,
+        candidate.useful_paired_weapon_upgrades,
     )
 
 
@@ -537,6 +763,10 @@ def _selection_reason(
         return "Selected the only valid Split candidate."
     if winner.main_assignment_vector != runner_up.main_assignment_vector:
         return "The winner has the stronger lexicographic Main assignment vector."
+    if winner.twine_score != runner_up.twine_score:
+        return "Main Savage scores tied; the winner has the stronger Twine score."
+    if winner.glaze_score != runner_up.glaze_score:
+        return "Main Savage and Twine scores tied; the winner has the stronger Glaze score."
     if winner.carry_balance_signature != runner_up.carry_balance_signature:
         return (
             "Main assignment scores tied; the winner has the stronger completed-DPS carry balance."
@@ -545,6 +775,10 @@ def _selection_reason(
         return "Main and carry scores tied; the winner has more useful Alt assignments."
     if winner.alt_assignment_vector != runner_up.alt_assignment_vector:
         return "Main and carry scores tied; the winner has the stronger Alt hierarchy vector."
+    if winner.useful_paired_weapon_upgrades != runner_up.useful_paired_weapon_upgrades:
+        return (
+            "All earlier loot scores tied; the winner has more useful paired Alt weapon upgrades."
+        )
     return "All meaningful scores tied; canonical candidate order selected the winner."
 
 

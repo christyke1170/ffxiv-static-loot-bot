@@ -104,6 +104,25 @@
 - After Main assignments and carry balance tie, candidates maximize useful Alt Savage assignments and
   then compare the Alt assignment vector in the same hierarchy order. Remaining ties use canonical
   candidate order, so winner selection is deterministic and read-only.
+- Split Twine and Glaze assignments are Main-only and use independent confirmed reclear-grant histories.
+  Eligible Mains are ordered by fewest exact-material grants, greatest remaining need, base job priority,
+  then stable roster order; the two physical copies are simulated sequentially without writing history.
+- Each Split run may receive one paired Alt Weapon Tomestone and Weapon Augment proposal. Both components
+  target the same eligible Alt, ranked by base job priority and roster order; Savage and Augmented Tome
+  weapons are ineligible. Planning does not change gear or create inventory records.
+- The complete Split comparison order is Main Savage vector, Twine score, Glaze score, completed-DPS
+  carry balance, useful Alt Savage total, Alt Savage vector, useful paired Alt weapon upgrades, then
+  canonical candidate order. Books remain excluded from Split planning.
+- Split Twine and Glaze assignments are Main-only and use independent confirmed reclear-grant histories.
+  Eligible Mains are ordered by fewest exact-material grants, greatest remaining need, base job priority,
+  then stable roster order; material copies are simulated sequentially per physical run. No material
+  history or inventory rows are written by planning.
+- Each Split run may also receive one paired Alt Weapon Tomestone and Weapon Augment proposal. Both
+  components name the same eligible Alt, selected by base job priority and roster order; Savage and
+  Augmented Tome weapons are ineligible. The proposal does not change current gear or create inventory.
+- The complete Split comparison order is Main Savage vector, Twine score, Glaze score, completed-DPS
+  carry balance, useful Alt Savage total, Alt Savage vector, useful paired Alt weapon upgrades, then
+  canonical candidate order. Books remain excluded from all Split planning scores and eligibility.
 - Reclear floor completion is append-only and unique per week, group, and floor; it awards one
   book and one weekly lockout to each participating character exactly once, then opens confirmation.
 - Confirmation questions are ordered by floor, group, loot-rule order, and drop instance. Receipt,

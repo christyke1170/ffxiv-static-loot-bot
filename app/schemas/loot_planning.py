@@ -222,6 +222,38 @@ class SplitSavageRunPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class SplitMaterialAssignment:
+    candidate_ordinal: int
+    run_name: str
+    floor_number: int
+    floor_name: str
+    material_label: str
+    disposition: PlannedLootDisposition
+    recipient: SplitRosterParticipant | None
+    recipient_job: str | None
+    recipient_designation: CharacterKind | None
+    confirmed_grant_count: int
+    remaining_need: int
+    explanation: str
+
+
+@dataclass(frozen=True, slots=True)
+class SplitWeaponUpgradeAssignment:
+    candidate_ordinal: int
+    run_name: str
+    recipient: SplitRosterParticipant | None
+    recipient_job: str | None
+    recipient_designation: CharacterKind | None
+    current_weapon_classification: str | None
+    tomestone_floor_number: int
+    tomestone_floor_name: str
+    augment_floor_number: int
+    augment_floor_name: str
+    disposition: PlannedLootDisposition
+    explanation: str
+
+
+@dataclass(frozen=True, slots=True)
 class SplitCarrySignature:
     """Carry comparison, highest DPS priority first: separated carries score 1, else 0."""
 
@@ -240,6 +272,12 @@ class SplitSavagePlanCandidate:
     alt_assignment_vector: tuple[int, ...]
     comparison_key: tuple[object, ...]
     avoided_main_conflicts: tuple[str, ...] = field(default_factory=tuple)
+    twine_assignments: tuple[SplitMaterialAssignment, ...] = field(default_factory=tuple)
+    glaze_assignments: tuple[SplitMaterialAssignment, ...] = field(default_factory=tuple)
+    weapon_upgrades: tuple[SplitWeaponUpgradeAssignment, ...] = field(default_factory=tuple)
+    twine_score: tuple[int, ...] = field(default_factory=tuple)
+    glaze_score: tuple[int, ...] = field(default_factory=tuple)
+    useful_paired_weapon_upgrades: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +288,9 @@ class SplitSavageRunnerUp:
     carry_balance_signature: SplitCarrySignature
     total_useful_alt_assignments: int
     alt_assignment_vector: tuple[int, ...]
+    twine_score: tuple[int, ...] = field(default_factory=tuple)
+    glaze_score: tuple[int, ...] = field(default_factory=tuple)
+    useful_paired_weapon_upgrades: int = 0
 
 
 @dataclass(frozen=True, slots=True)

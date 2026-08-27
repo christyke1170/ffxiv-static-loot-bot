@@ -10,6 +10,7 @@ from app.models import (
     CharacterBisSelection,
     CharacterGearSlot,
     CharacterKind,
+    ConfirmedReclearMaterialGrant,
     GearClassification,
     GearSlotCode,
     LootAssignment,
@@ -202,3 +203,135 @@ def test_alt_receives_only_when_no_main_needs_the_coffer(session):
         and row.recipient_designation is CharacterKind.ALT
         for row in head_rows
     )
+
+
+def test_twine_and_glaze_are_main_only_and_use_independent_histories(session):
+    fixture = make_split_savage_fixture(session)
+    for main in fixture.mains:
+        fixture.set_augmented_need(main, GearSlotCode.BODY, "ARMOR_TWINE")
+        fixture.set_augmented_need(main, GearSlotCode.EARRINGS, "ACCESSORY_GLAZE")
+    fixture.grant(fixture.mains[0], "ARMOR_TWINE", 2)
+    fixture.grant(fixture.mains[1], "ACCESSORY_GLAZE", 2)
+    result = plan_split_savage_loot(session, fixture.static.id)
+
+    twines = result.winner.twine_assignments
+    glazes = result.winner.glaze_assignments
+    assert len(twines) == len(glazes) == 2
+    assert all(row.recipient_designation is CharacterKind.MAIN for row in (*twines, *glazes))
+    assert all(row.recipient is not None for row in (*twines, *glazes))
+    assert all(row.confirmed_grant_count >= 0 for row in (*twines, *glazes))
+    assert any(row.confirmed_grant_count == 0 for row in twines)
+    assert any(row.confirmed_grant_count == 0 for row in glazes)
+    assert result.winner.twine_score[0] == sum(row.recipient is not None for row in twines)
+    assert result.winner.glaze_score[0] == sum(row.recipient is not None for row in glazes)
+
+
+def test_material_without_remaining_need_is_free_roll_and_does_not_write_history(session):
+    fixture = make_split_savage_fixture(session)
+    before = session.query(ConfirmedReclearMaterialGrant).count()
+    result = plan_split_savage_loot(session, fixture.static.id)
+
+    assert all(
+        row.disposition is PlannedLootDisposition.FREE_ROLL
+        for row in (*result.winner.twine_assignments, *result.winner.glaze_assignments)
+    )
+    assert session.query(ConfirmedReclearMaterialGrant).count() == before == 0
+
+
+def test_paired_weapon_upgrade_uses_one_alt_for_both_components(session):
+    fixture = make_split_savage_fixture(session)
+    result = plan_split_savage_loot(session, fixture.static.id)
+
+    upgrades = result.winner.weapon_upgrades
+    assert len(upgrades) == 2
+    assert result.winner.useful_paired_weapon_upgrades == 2
+    assert all(row.disposition is PlannedLootDisposition.ASSIGNED for row in upgrades)
+    assert all(row.recipient_designation is CharacterKind.ALT for row in upgrades)
+    assert all(row.recipient is not None for row in upgrades)
+    assert all(row.tomestone_floor_number == 2 for row in upgrades)
+    assert all(row.augment_floor_number == 3 for row in upgrades)
+    assert all(row.recipient.character_id != fixture.mains[0].id for row in upgrades)
+
+
+def test_weapon_upgrade_rejects_savage_and_augmented_tome_alts(session):
+    fixture = make_split_savage_fixture(session)
+    weapon = fixture.slots[GearSlotCode.WEAPON]
+    for index, alt in enumerate(fixture.alts):
+        alt.gear_slots.append(
+            CharacterGearSlot(
+                gear_slot=weapon,
+                current_classification=(
+                    GearClassification.SAVAGE if index < 4 else GearClassification.AUGMENTED_TOME
+                ),
+            )
+        )
+    session.commit()
+    result = plan_split_savage_loot(session, fixture.static.id)
+
+    assert result.winner.useful_paired_weapon_upgrades == 0
+    assert all(
+        row.disposition is PlannedLootDisposition.FREE_ROLL for row in result.winner.weapon_upgrades
+    )
+    assert all(row.recipient is None for row in result.winner.weapon_upgrades)
+
+
+def test_weapon_upgrade_uses_highest_priority_eligible_alt_and_does_not_mutate_gear(session):
+    fixture = make_split_savage_fixture(session)
+    weapon = fixture.slots[GearSlotCode.WEAPON]
+    for alt in fixture.alts:
+        alt.gear_slots.append(
+            CharacterGearSlot(gear_slot=weapon, current_classification=GearClassification.SAVAGE)
+        )
+    eligible = fixture.alts[0]
+    eligible.gear_slots[0].current_classification = GearClassification.CRAFTED
+    before = [(alt.id, alt.gear_slots[0].current_classification) for alt in fixture.alts]
+    session.commit()
+    result = plan_split_savage_loot(session, fixture.static.id)
+    after = [(alt.id, alt.gear_slots[0].current_classification) for alt in fixture.alts]
+
+    assert result.winner.useful_paired_weapon_upgrades == 1
+    assert (
+        sum(
+            row.recipient is not None and row.recipient.character_id == eligible.id
+            for row in result.winner.weapon_upgrades
+        )
+        == 1
+    )
+    assert before == after
+
+
+def test_final_score_key_orders_main_material_carry_alt_weapon_then_canonical(session):
+    fixture = make_split_savage_fixture(session)
+    result = plan_split_savage_loot(session, fixture.static.id)
+    winner = result.winner
+
+    assert winner.comparison_key[0] == winner.main_assignment_vector
+    assert winner.comparison_key[1] == winner.twine_score
+    assert winner.comparison_key[2] == winner.glaze_score
+    assert winner.comparison_key[3] == winner.carry_balance_signature.separated_completed_dps
+    assert winner.comparison_key[4] == winner.total_useful_alt_assignments
+    assert winner.comparison_key[5] == winner.alt_assignment_vector
+    assert winner.comparison_key[6] == winner.useful_paired_weapon_upgrades
+    assert winner.comparison_key[7] == -winner.candidate_ordinal
+    assert result.runner_up is not None
+    assert result.selection_reasoning
+
+
+def test_step_five_result_is_deterministic_serializable_and_read_only(session, engine):
+    fixture = make_split_savage_fixture(session)
+    writes: list[str] = []
+
+    def record_writes(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+            writes.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_writes)
+    try:
+        first = plan_split_savage_loot(session, fixture.static.id)
+        second = plan_split_savage_loot(session, fixture.static.id)
+    finally:
+        event.remove(engine, "before_cursor_execute", record_writes)
+
+    assert first == second
+    assert asdict(first)["winner"]["run_a"]["assignments"]
+    assert writes == []
