@@ -7,17 +7,20 @@ from discord.ext import commands
 
 from app.models import (
     ClearMode,
-    LootPlanState,
     ReclearWorkflowState,
 )
-from app.schemas.planning import LootPlanGenerationError
+from app.schemas.loot_plan_persistence import (
+    ActiveLootPlanConflict,
+    ActiveLootPlanError,
+    PersistedLootPlanNotFound,
+)
 from app.services import (
     cancel_reclear_week,
     close_reclear_week,
     confirmation_progress,
     current_week,
-    generate_weekly_loot_plan,
-    load_loot_board,
+    generate_and_persist_loot_plan,
+    load_active_loot_plan,
     mark_reclear_floors_complete,
     reclear_status,
     setup_roster,
@@ -25,7 +28,7 @@ from app.services import (
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
 from bot.views.confirmation import first_confirmation_view
-from bot.views.lootboard import LootBoardView
+from bot.views.loot_plan import LootPlanCancelView, LootPlanView
 from bot.views.reclear import ConfirmActionView, SetupPreviewView, roster_text
 
 
@@ -85,30 +88,65 @@ class Reclear(commands.Cog):
             )
         await reply(interaction, text)
 
-    @group.command(name="plan", description="Validate and generate this reset's loot plan")
+    @group.command(name="plan", description="Generate a Regular or Split loot plan")
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="Regular", value="REGULAR"),
+            app_commands.Choice(name="Split", value="SPLIT"),
+        ]
+    )
     @require_raid_leader(None)
-    async def plan(self, interaction):
+    async def plan(self, interaction, mode: app_commands.Choice[str]):
         await defer(interaction, ephemeral=True)
         try:
             with command_session(self.bot) as session:
-                week = current_week(session, selected(session, interaction).id)
-                result = generate_weekly_loot_plan(session, week.id)
-                result.plan.state = LootPlanState.ACTIVE
-                if week.workflow_state is ReclearWorkflowState.DRAFT:
-                    week.workflow_state = ReclearWorkflowState.PLANNED
-                board = load_loot_board(session, week.static_id)
-                reused = result.reused_existing_plan
-        except LootPlanGenerationError as error:
-            issues = error.validation.issues if error.validation else []
-            text = "Planning blocked:\n" + "\n".join(f"- {issue.message}" for issue in issues)
-            await reply(interaction, text, ephemeral=True)
+                static = selected(session, interaction)
+                result = generate_and_persist_loot_plan(
+                    session, static.id, ClearMode(mode.value), interaction.user.id
+                )
+        except (ActiveLootPlanError, ValueError) as error:
+            await reply(interaction, f"Plan generation blocked: {error}", ephemeral=True)
             return
-        view = LootBoardView(self.bot, board)
         await interaction.followup.send(
-            f"{'Existing' if reused else 'Generated'} plan with {len(board.rows)} assignments.",
-            view=view,
+            "Plan generated and saved as READY.",
+            view=LootPlanView(self.bot, result, interaction.user.id),
             ephemeral=True,
         )
+
+    @group.command(name="plan-view", description="View the active generated loot plan")
+    async def plan_view(self, interaction):
+        await defer(interaction, ephemeral=True)
+        try:
+            with command_session(self.bot) as session:
+                static = selected(session, interaction)
+                result = load_active_loot_plan(session, static.id)
+        except (ActiveLootPlanConflict, PersistedLootPlanNotFound, ValueError) as error:
+            await reply(interaction, f"Unable to load active plan: {error}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            view=LootPlanView(self.bot, result, interaction.user.id), ephemeral=True
+        )
+
+    @group.command(name="plan-cancel", description="Cancel the active generated loot plan")
+    @require_raid_leader(None)
+    async def plan_cancel(self, interaction):
+        await defer(interaction, ephemeral=True)
+        try:
+            with command_session(self.bot) as session:
+                static = selected(session, interaction)
+                result = load_active_loot_plan(session, static.id)
+        except (ActiveLootPlanConflict, PersistedLootPlanNotFound, ValueError) as error:
+            await reply(interaction, f"Unable to load active plan: {error}", ephemeral=True)
+            return
+        text = (
+            f"Cancel plan for {result.static_name}?\n"
+            f"Tier: {result.tier_name}\nWeek: {result.target_week}\n"
+            f"Mode: {result.mode.value.title()}\nStatus: {result.status.value.title()}"
+        )
+        view = LootPlanCancelView(
+            self.bot, result.plan_id, result.static_id, interaction.user.id, text
+        )
+        await interaction.followup.send(view=view, ephemeral=True)
 
     @group.command(name="complete", description="Preview floor/group completion records")
     @require_raid_leader(None)

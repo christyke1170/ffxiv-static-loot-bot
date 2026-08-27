@@ -131,6 +131,10 @@
 - Active plans can be loaded by static, tier, and target week. DRAFT and READY plans may be cancelled;
   applied plans cannot be cancelled. Cancellation preserves the historical plan contents and applies
   no loot.
+- Authorized users can generate Regular or Split plans through Discord. Active plans can be viewed
+  without recalculation; displays include rosters, assignments, materials, free rolls, and Alt weapon
+  proposals. Stale and unverifiable plans show warnings. DRAFT and READY plans can be cancelled through
+  a confirmation view. Discord planning commands do not apply loot or advance the week.
 - The complete Split comparison order is Main Savage vector, Twine score, Glaze score, completed-DPS
   carry balance, useful Alt Savage total, Alt Savage vector, useful paired Alt weapon upgrades, then
   canonical candidate order. Books remain excluded from all Split planning scores and eligibility.
