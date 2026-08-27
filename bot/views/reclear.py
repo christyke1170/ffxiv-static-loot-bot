@@ -1,0 +1,162 @@
+"""Components V2 weekly roster previews and completion confirmations."""
+
+import discord
+
+from app.models import ClearMode
+from app.services.reclear import create_reclear_week, preview_rosters
+from bot.checks import is_raid_leader
+from bot.services.commands import command_session, selected
+
+
+def roster_text(rosters) -> str:
+    sections = []
+    for index, roster in enumerate(rosters, 1):
+        title = "Roster" if len(rosters) == 1 else f"Split {chr(64 + index)}"
+        lines = [f"- {character.name} ({character.kind.value.title()})" for character in roster]
+        sections.append(f"**{title}**\n" + "\n".join(lines))
+    return "\n\n".join(sections)[:1900]
+
+
+class SetupPreviewView(discord.ui.LayoutView):
+    def __init__(self, bot, static_id: int, mode: ClearMode, notes: str | None, members):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.static_id = static_id
+        self.mode = mode
+        self.notes = notes
+        self.selected_ids: set[int] = set()
+        self.members = members
+        self._build()
+
+    def _build(self, preview: str | None = None, notice: str | None = None):
+        self.clear_items()
+        text = preview or "Select exactly four members whose mains will join Split A."
+        if notice:
+            text += f"\n\n{notice}"
+        self.add_item(discord.ui.Container(discord.ui.TextDisplay(text)))
+        if self.mode is ClearMode.SPLIT:
+            select = discord.ui.Select(
+                custom_id=f"rs:{self.static_id}:members",
+                placeholder="Choose four Split A mains",
+                min_values=4,
+                max_values=4,
+                options=[
+                    discord.SelectOption(label=m.display_name[:100], value=str(m.id))
+                    for m in self.members
+                ],
+            )
+            select.callback = self.reselect
+            self.add_item(discord.ui.ActionRow(select))
+        confirm = discord.ui.Button(
+            label="Confirm", style=discord.ButtonStyle.success, custom_id=f"rs:{self.static_id}:ok"
+        )
+        cancel = discord.ui.Button(
+            label="Cancel",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"rs:{self.static_id}:cancel",
+        )
+        confirm.callback = self.confirm
+        cancel.callback = self.cancel
+        if self.mode is ClearMode.SPLIT:
+            reselect = discord.ui.Button(
+                label="Reselect", custom_id=f"rs:{self.static_id}:reselect"
+            )
+            reselect.callback = self.reset_selection
+            self.add_item(discord.ui.ActionRow(confirm, reselect, cancel))
+        else:
+            self.add_item(discord.ui.ActionRow(confirm, cancel))
+
+    async def interaction_check(self, interaction):
+        if not is_raid_leader(interaction, None):
+            await interaction.response.send_message(
+                "Raid-leader permission is required.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def reselect(self, interaction):
+        select = next(item for item in self.walk_children() if isinstance(item, discord.ui.Select))
+        self.selected_ids = {int(value) for value in select.values}
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            if static.id != self.static_id:
+                raise ValueError("This setup preview is stale for the selected static.")
+            rosters = preview_rosters(session, static, self.mode, self.selected_ids)
+            preview = roster_text(rosters)
+        self._build(preview)
+        await interaction.response.edit_message(view=self)
+
+    async def confirm(self, interaction):
+        if self.mode is ClearMode.SPLIT and len(self.selected_ids) != 4:
+            await interaction.response.send_message(
+                "Select exactly four members first.", ephemeral=True
+            )
+            return
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            if static.id != self.static_id:
+                raise ValueError("This setup preview is stale for the selected static.")
+            week = create_reclear_week(
+                session,
+                static,
+                self.mode,
+                split_a_main_member_ids=self.selected_ids or None,
+                notes=self.notes,
+                actor_discord_user_id=interaction.user.id,
+            )
+            text = f"Reclear week {week.week_start} saved as DRAFT."
+        self._build(notice=text)
+        self._disable()
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def reset_selection(self, interaction):
+        self.selected_ids.clear()
+        self._build(notice="Selection cleared. Choose exactly four members again.")
+        await interaction.response.edit_message(view=self)
+
+    async def cancel(self, interaction):
+        self._build(notice="Setup cancelled; nothing was saved.")
+        self._disable()
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    def _disable(self):
+        for item in self.walk_children():
+            if hasattr(item, "disabled"):
+                item.disabled = True
+
+
+class ConfirmActionView(discord.ui.LayoutView):
+    def __init__(self, on_confirm, text: str, custom_prefix: str):
+        super().__init__(timeout=300)
+        self.on_confirm = on_confirm
+        self.add_item(discord.ui.Container(discord.ui.TextDisplay(text[:1900])))
+        confirm = discord.ui.Button(
+            label="Confirm", style=discord.ButtonStyle.success, custom_id=f"{custom_prefix}:ok"
+        )
+        cancel = discord.ui.Button(
+            label="Cancel", style=discord.ButtonStyle.danger, custom_id=f"{custom_prefix}:cancel"
+        )
+        confirm.callback = self.confirm
+        cancel.callback = self.cancel
+        self.add_item(discord.ui.ActionRow(confirm, cancel))
+
+    async def interaction_check(self, interaction):
+        if not is_raid_leader(interaction, None):
+            await interaction.response.send_message(
+                "Raid-leader permission is required.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def confirm(self, interaction):
+        await self.on_confirm(interaction)
+        self.stop()
+
+    async def cancel(self, interaction):
+        for item in self.walk_children():
+            if hasattr(item, "disabled"):
+                item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()

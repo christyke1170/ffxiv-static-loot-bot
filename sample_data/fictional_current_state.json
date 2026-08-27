@@ -1,0 +1,39 @@
+{
+  "characters": [
+    {
+      "name": "Fictional Melon",
+      "world": "Sample World",
+      "gear_slots": [
+        {
+          "slot": "WEAPON",
+          "current_classification": "SAVAGE"
+        },
+        {
+          "slot": "HEAD",
+          "current_classification": "CRAFTED"
+        }
+      ],
+      "inventory_items": [
+        {
+          "item": "Fictional Tome Cuirass",
+          "quantity": 1,
+          "item_level": 720
+        }
+      ],
+      "books": [
+        {
+          "floor": 1,
+          "earned": 6,
+          "spent": 2,
+          "manual_adjustment": 1
+        }
+      ],
+      "augmentation_materials": [
+        {
+          "material": "POLISH",
+          "quantity": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "static-loot-discord"
+version = "0.1.0"
+description = "Discord bot foundation for FFXIV Savage BiS and split-clear loot management"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13,<2",
+    "discord.py>=2.6,<3",
+    "python-dotenv>=1.0,<2",
+    "psycopg[binary]>=3.2,<4",
+    "SQLAlchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<2",
+    "ruff>=0.8,<1",
+    "build>=1.2,<2",
+]
+
+[project.scripts]
+static-loot-bot = "bot.main:main"
+static-loot-db-upgrade = "app.cli:db_upgrade"
+static-loot-db-check = "app.cli:db_check"
+static-loot-db-backup = "app.cli:db_backup"
+static-loot-validate = "app.cli:validate"
+
+[tool.setuptools.packages.find]
+include = ["app*", "bot*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"migrations/versions/*.py" = ["E501"]

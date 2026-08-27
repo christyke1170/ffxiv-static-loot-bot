@@ -1,0 +1,27 @@
+{
+  "code": "E2E_ARC",
+  "name": "Fictional E2E Arc",
+  "active": true,
+  "floors": [
+    {"number": 1, "name": "E1S"},
+    {"number": 2, "name": "E2S"},
+    {"number": 3, "name": "E3S"},
+    {"number": 4, "name": "E4S"}
+  ],
+  "loot_types": [
+    {"code": "WEAPON", "name": "Fictional Weapon", "category": "GEAR", "item": "Fictional Savage Sword"},
+    {"code": "HEAD_COFFER", "name": "Fictional Head Coffer", "category": "COFFER", "item": "Fictional Head Coffer"},
+    {"code": "ACCESSORY_GLAZE", "name": "Fictional Glaze", "category": "AUGMENTATION_MATERIAL", "item": "Fictional Glaze"},
+    {"code": "ARMOR_TWINE", "name": "Fictional Twine", "category": "AUGMENTATION_MATERIAL", "item": "Fictional Twine"}
+  ],
+  "augmentation_material_types": [
+    {"code": "ACCESSORY_GLAZE", "name": "Fictional Glaze", "item": "Fictional Glaze"},
+    {"code": "ARMOR_TWINE", "name": "Fictional Twine", "item": "Fictional Twine"}
+  ],
+  "floor_loot_rules": [
+    {"floor": 1, "loot_type": "WEAPON", "expected_quantity": 1, "book_cost": 8},
+    {"floor": 2, "loot_type": "HEAD_COFFER", "expected_quantity": 1, "book_cost": 4},
+    {"floor": 3, "loot_type": "ACCESSORY_GLAZE", "expected_quantity": 1, "augmentation_material": "ACCESSORY_GLAZE"},
+    {"floor": 4, "loot_type": "ARMOR_TWINE", "expected_quantity": 1, "augmentation_material": "ARMOR_TWINE"}
+  ]
+}

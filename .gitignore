@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.pytest_cache/
+.ruff_cache/
+.venv/
+static_loot.db
+test.db
+dist/
+build/
+backups/
+*.backup.db
+*.backup.sqlite*
+
+# Test and coverage output
+.coverage
+.coverage.*
+htmlcov/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Type-checker caches
+.mypy_cache/
+.pyright/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local environment variants
+.env.*
+!.env.example

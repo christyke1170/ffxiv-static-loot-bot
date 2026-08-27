@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: static_loot
+      POSTGRES_USER: static_loot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U static_loot -d static_loot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://static_loot:${POSTGRES_PASSWORD}@db/static_loot
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "static-loot-db-upgrade && exec static-loot-bot"]
+volumes:
+  postgres-data:

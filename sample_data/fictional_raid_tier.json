@@ -1,0 +1,20 @@
+{
+  "code": "FICTIONAL_ARC",
+  "name": "Fictional Arc (sample only)",
+  "active": true,
+  "floors": [
+    {"number": 1, "name": "Fictional Arc One"},
+    {"number": 2, "name": "Fictional Arc Two"}
+  ],
+  "loot_types": [
+    {"code": "HEAD_COFFER", "name": "Fictional Head Coffer", "category": "COFFER", "item": "Fictional Head Coffer"},
+    {"code": "POLISH", "name": "Fictional Polish", "category": "AUGMENTATION_MATERIAL", "item": "Fictional Polish"}
+  ],
+  "augmentation_material_types": [
+    {"code": "POLISH", "name": "Fictional Polish", "item": "Fictional Polish"}
+  ],
+  "floor_loot_rules": [
+    {"floor": 1, "loot_type": "HEAD_COFFER", "expected_quantity": 1, "book_cost": 4},
+    {"floor": 2, "loot_type": "POLISH", "expected_quantity": 1, "augmentation_material": "POLISH"}
+  ]
+}
