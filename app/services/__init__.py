@@ -16,6 +16,10 @@ from app.services.imports import (
     import_bis_sets,
     import_raid_tier,
 )
+from app.services.loot_plan_persistence import (
+    generate_and_persist_loot_plan,
+    load_persisted_loot_plan,
+)
 from app.services.loot_planning import (
     calculate_regular_loot_plan,
     generate_split_roster_candidates,
@@ -50,6 +54,8 @@ __all__ = [
     "generate_split_roster_candidates",
     "plan_split_savage_loot",
     "generate_weekly_loot_plan",
+    "generate_and_persist_loot_plan",
+    "load_persisted_loot_plan",
     "import_bis_sets",
     "import_raid_tier",
     "seed_reference_data",

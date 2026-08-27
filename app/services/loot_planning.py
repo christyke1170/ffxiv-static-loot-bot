@@ -116,6 +116,7 @@ def calculate_regular_loot_plan(session: Session, static_id: int) -> RegularLoot
 
         participants = tuple(
             RegularPlanParticipant(
+                character_id=character.id,
                 roster_order=index,
                 character_name=character.name,
                 world=character.world,
@@ -435,8 +436,12 @@ def _score_split_candidate(
     return SplitSavagePlanCandidate(
         candidate.partition_ordinal,
         candidate.candidate_identifier,
-        SplitSavageRunPlan("Split Run A", tuple(assignments["Split Run A"])),
-        SplitSavageRunPlan("Split Run B", tuple(assignments["Split Run B"])),
+        SplitSavageRunPlan(
+            "Split Run A", candidate.run_a.participants, tuple(assignments["Split Run A"])
+        ),
+        SplitSavageRunPlan(
+            "Split Run B", candidate.run_b.participants, tuple(assignments["Split Run B"])
+        ),
         main_vector,
         carry_signature,
         sum(alt_vector),
@@ -548,6 +553,7 @@ def _assign_split_material(
                 floor_number,
                 floor.name,
                 material.name,
+                material_code,
                 PlannedLootDisposition.ASSIGNED,
                 winner,
                 winner.job,
@@ -597,6 +603,7 @@ def _free_material_assignment(
         floor_number,
         floor.name if floor is not None else f"Floor {floor_number}",
         label,
+        "ACCESSORY_GLAZE" if floor_number == 2 else "ARMOR_TWINE",
         PlannedLootDisposition.FREE_ROLL,
         None,
         None,

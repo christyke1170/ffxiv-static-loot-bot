@@ -68,6 +68,7 @@ class PlanningRaidTier:
 
 @dataclass(frozen=True, slots=True)
 class RegularPlanParticipant:
+    character_id: int
     roster_order: int
     character_name: str
     world: str
@@ -218,6 +219,7 @@ class SplitSavageAssignment:
 @dataclass(frozen=True, slots=True)
 class SplitSavageRunPlan:
     name: str
+    participants: tuple[SplitRosterParticipant, ...]
     assignments: tuple[SplitSavageAssignment, ...]
 
 
@@ -228,6 +230,7 @@ class SplitMaterialAssignment:
     floor_number: int
     floor_name: str
     material_label: str
+    material_code: str
     disposition: PlannedLootDisposition
     recipient: SplitRosterParticipant | None
     recipient_job: str | None
@@ -304,6 +307,10 @@ class SplitSavagePlanResult:
     winner: SplitSavagePlanCandidate | None = None
     runner_up: SplitSavageRunnerUp | None = None
     selection_reasoning: str = ""
+
+    @property
+    def mode(self) -> ClearMode:
+        return ClearMode.SPLIT
 
     @property
     def errors(self) -> tuple[LootPlanningIssue, ...]:

@@ -120,6 +120,11 @@
 - Each Split run may also receive one paired Alt Weapon Tomestone and Weapon Augment proposal. Both
   components name the same eligible Alt, selected by base job priority and roster order; Savage and
   Augmented Tome weapons are ineligible. The proposal does not change current gear or create inventory.
+- Valid generated Regular and Split plans can be persisted as READY snapshots. Their run structures,
+  participants, Main/Alt identity, assignments, materials, and paired Alt weapon components are stored
+  for later loading. Materials and paired weapon components remain proposals until confirmation.
+- Only one active generated plan is allowed for a static, raid tier, and target week. Persisting a plan
+  does not apply loot or advance the static's week.
 - The complete Split comparison order is Main Savage vector, Twine score, Glaze score, completed-DPS
   carry balance, useful Alt Savage total, Alt Savage vector, useful paired Alt weapon upgrades, then
   canonical candidate order. Books remain excluded from all Split planning scores and eligibility.

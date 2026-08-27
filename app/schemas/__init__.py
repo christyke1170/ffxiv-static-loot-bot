@@ -1,6 +1,16 @@
 """Typed, transport-independent service results."""
 
 from app.schemas.confirmations import ConfirmationError, ConfirmationProgress, ConfirmationQueueItem
+from app.schemas.loot_plan_persistence import (
+    ActiveLootPlanError,
+    LootPlanPersistenceError,
+    LootPlanValidationError,
+    PersistedLootAssignment,
+    PersistedLootParticipant,
+    PersistedLootPlanNotFound,
+    PersistedLootPlanResult,
+    PersistedLootRun,
+)
 from app.schemas.loot_planning import (
     CombatRole,
     LootPlanningIssue,
@@ -98,4 +108,12 @@ __all__ = [
     "ConfirmationError",
     "ConfirmationProgress",
     "ConfirmationQueueItem",
+    "ActiveLootPlanError",
+    "LootPlanPersistenceError",
+    "LootPlanValidationError",
+    "PersistedLootAssignment",
+    "PersistedLootParticipant",
+    "PersistedLootPlanNotFound",
+    "PersistedLootPlanResult",
+    "PersistedLootRun",
 ]
