@@ -109,6 +109,34 @@ def test_clean_migration_downgrade_and_reupgrade_remove_current_gear_tier(tmp_pa
         engine.dispose()
 
 
+def test_weekly_loot_foundation_migration_upgrade_and_downgrade(tmp_path):
+    database = tmp_path / "weekly-foundation-cycle.db"
+    settings = Settings(database_url=f"sqlite:///{database}")
+    config = _alembic_config(settings)
+
+    command.upgrade(config, "head")
+    with sqlite3.connect(database) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+        assert {
+            "loot_plan_runs",
+            "loot_plan_participants",
+            "confirmed_reclear_material_grants",
+        } <= tables
+        plan_columns = {row[1] for row in connection.execute("PRAGMA table_info(loot_plans)")}
+        assert {"mode", "status", "created_at", "updated_at", "applied_at", "cancelled_at"} <= (
+            plan_columns
+        )
+
+    command.downgrade(config, "j9d4e6f7a8b9")
+    with sqlite3.connect(database) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+        assert "loot_plan_runs" not in tables
+        plan_columns = {row[1] for row in connection.execute("PRAGMA table_info(loot_plans)")}
+        assert "status" not in plan_columns
+
+    command.upgrade(config, "head")
+
+
 async def test_graceful_shutdown_disposes_database(monkeypatch, tmp_path):
     client = StaticLootClient(Settings(database_url=f"sqlite:///{tmp_path / 'close.db'}"))
     disposed = False

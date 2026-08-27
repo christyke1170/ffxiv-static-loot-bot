@@ -56,6 +56,98 @@ def calculate_character_needs(
         return _calculate(state)
 
 
+def calculate_characters_needs(
+    session: Session,
+    character_ids: list[int] | tuple[int, ...],
+    raid_tier_id: int,
+    *,
+    include_books: bool = True,
+) -> dict[int, CharacterNeedsResult]:
+    """Calculate multiple characters with shared eager loads and no writes."""
+    ordered_ids = list(dict.fromkeys(character_ids))
+    if not ordered_ids:
+        return {}
+    with session.no_autoflush:
+        characters = list(
+            session.scalars(
+                select(Character)
+                .where(Character.id.in_(ordered_ids))
+                .execution_options(populate_existing=True)
+                .options(
+                    selectinload(Character.gear_slots).joinedload(CharacterGearSlot.gear_slot),
+                    selectinload(Character.inventory_items).joinedload(InventoryItem.item),
+                )
+            )
+        )
+        by_id = {character.id: character for character in characters}
+        missing = [character_id for character_id in ordered_ids if character_id not in by_id]
+        if missing:
+            raise LookupError(f"unknown character id {missing[0]}")
+        tier = session.scalar(
+            select(RaidTier)
+            .where(RaidTier.id == raid_tier_id)
+            .options(
+                selectinload(RaidTier.floors).selectinload(RaidFloor.loot_rules),
+                selectinload(RaidTier.loot_types).joinedload(LootType.item),
+                selectinload(RaidTier.augmentation_material_types),
+            )
+        )
+        if tier is None:
+            raise LookupError(f"unknown raid tier id {raid_tier_id}")
+        selections = {
+            row.character_id: row
+            for row in session.scalars(
+                select(CharacterBisSelection)
+                .where(
+                    CharacterBisSelection.character_id.in_(ordered_ids),
+                    CharacterBisSelection.raid_tier_id == raid_tier_id,
+                )
+                .options(
+                    joinedload(CharacterBisSelection.bis_set)
+                    .selectinload(BisSet.items)
+                    .options(
+                        joinedload(BisSetItem.gear_slot),
+                        joinedload(BisSetItem.desired_item),
+                        joinedload(BisSetItem.raid_floor),
+                        joinedload(BisSetItem.loot_type).joinedload(LootType.item),
+                        joinedload(BisSetItem.base_tome_item),
+                        joinedload(BisSetItem.augmentation_material_type),
+                    )
+                )
+            )
+        }
+        slots = list(session.scalars(select(GearSlot).order_by(GearSlot.sort_order)))
+        material_rows = session.scalars(
+            select(CharacterAugmentationInventory).where(
+                CharacterAugmentationInventory.character_id.in_(ordered_ids)
+            )
+        )
+        materials: dict[int, dict[int, int]] = defaultdict(dict)
+        for row in material_rows:
+            materials[row.character_id][row.augmentation_material_type_id] = row.quantity
+        books: dict[int, dict[int, int]] = defaultdict(dict)
+        if include_books:
+            for row in session.scalars(
+                select(CharacterFloorBookBalance).where(
+                    CharacterFloorBookBalance.character_id.in_(ordered_ids)
+                )
+            ):
+                books[row.character_id][row.raid_floor_id] = max(row.available, 0)
+        return {
+            character_id: _calculate(
+                _LoadedState(
+                    by_id[character_id],
+                    tier,
+                    selections.get(character_id),
+                    slots,
+                    materials[character_id],
+                    books[character_id],
+                )
+            )
+            for character_id in ordered_ids
+        }
+
+
 def _load_state(session: Session, character_id: int, raid_tier_id: int) -> _LoadedState:
     character = session.scalar(
         select(Character)

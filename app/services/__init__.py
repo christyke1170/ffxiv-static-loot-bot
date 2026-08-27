@@ -16,7 +16,12 @@ from app.services.imports import (
     import_bis_sets,
     import_raid_tier,
 )
-from app.services.needs import calculate_character_needs
+from app.services.loot_planning import (
+    calculate_regular_loot_plan,
+    generate_split_roster_candidates,
+    plan_split_savage_loot,
+)
+from app.services.needs import calculate_character_needs, calculate_characters_needs
 from app.services.planning import generate_weekly_loot_plan, validate_weekly_roster
 from app.services.reclear import (
     cancel_reclear_week,
@@ -40,6 +45,10 @@ __all__ = [
     "ImportCounts",
     "ResetPeriodPolicy",
     "calculate_character_needs",
+    "calculate_characters_needs",
+    "calculate_regular_loot_plan",
+    "generate_split_roster_candidates",
+    "plan_split_savage_loot",
     "generate_weekly_loot_plan",
     "import_bis_sets",
     "import_raid_tier",

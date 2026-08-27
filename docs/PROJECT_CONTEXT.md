@@ -69,6 +69,41 @@
   from their selected same-tier BiS set. Plan balancing and confirmed tier receipts are secondary
   tiebreakers; missing snapshot jobs sort last with a warning.
 - Planning simulates coffer and augmentation consumption without changing gear or inventory.
+- Read-only Regular planning uses this fixed base-job priority, highest first: SAM, VPR, BLM, RPR,
+  MNK, DRG, NIN, PCT, SMN, RDM, MCH, DNC, BRD, WHM, SGE, AST, SCH, DRK, GNB, PLD, WAR.
+  Same-job ties use stable static-roster order; unsupported jobs warn and sort after supported jobs.
+- A Regular proposal contains all eight active members' Mains and exactly one run. It tracks Earring,
+  Necklace, Bracelet, and Ring coffers on Floor 1; Head, Gloves, and Boots coffers plus Glaze on
+  Floor 2; Chest and Pants coffers plus Twine on Floor 3; and one Weapon Coffer on Floor 4.
+  Weapon Tomestone and Weapon Augment are free-roll and untracked in Regular planning, as are random
+  Savage weapons and cosmetic drops.
+- Regular Savage coffers use unlimited funneling: each configured drop goes to the highest-priority
+  participating Main who retains that Savage need in the authoritative needs calculation, and one
+  Main may receive multiple drops. Drops with no eligible Main are free roll.
+- Regular Twine and Glaze are ranked independently by fewest confirmed bot-managed reclear grants of
+  that exact material, most current remaining material need, base-job priority, then roster order.
+  Manual/imported/current material ownership can reduce remaining need but is never fairness history;
+  base Tome item ownership is not required for material eligibility.
+- Regular planning ignores Savage books completely: book balances and purchasing alternatives do not
+  affect eligibility, ranking, assignment, or material priority.
+- Read-only Split roster generation deterministically considers all 35 unique complementary four-Main
+  partitions before composition filtering. Run A always includes the first stable-roster member's Main,
+  which removes mirrored Run A/Run B duplicates.
+- Every Split candidate has two complementary eight-character runs with four Mains and four Alts each.
+  Every member appears in both runs, plays Main once and Alt once, and has their Main and Alt in
+  opposite runs. Each accepted run strictly requires 2 Tanks, 2 Healers, and 4 DPS; melee, physical
+  ranged, and magical ranged jobs all count as DPS. Candidate generation is deterministic, read-only,
+  and does not score candidates or assign loot.
+- Split Savage planning assigns each guaranteed coffer to an eligible Main first; an Alt is considered
+  only when no Main in that physical run needs the coffer, and otherwise the coffer is free roll.
+  Unlimited funneling is allowed and no one-item-per-player or Savage fairness rotation is applied.
+- Split Savage candidates are compared first by a lexicographic 21-position Main assignment vector in
+  base job-hierarchy order. Carry balance is considered only after that vector ties: completed Main DPS
+  carries are compared in priority order, preferring carries separated between the two runs. Tanks,
+  Healers, and incomplete DPS are not carries.
+- After Main assignments and carry balance tie, candidates maximize useful Alt Savage assignments and
+  then compare the Alt assignment vector in the same hierarchy order. Remaining ties use canonical
+  candidate order, so winner selection is deterministic and read-only.
 - Reclear floor completion is append-only and unique per week, group, and floor; it awards one
   book and one weekly lockout to each participating character exactly once, then opens confirmation.
 - Confirmation questions are ordered by floor, group, loot-rule order, and drop instance. Receipt,

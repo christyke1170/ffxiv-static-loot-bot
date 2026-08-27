@@ -31,7 +31,9 @@ from app.models.enums import (
     LootCategory,
     LootConfirmationType,
     LootPlanState,
+    PlannedLootDisposition,
     ReclearWorkflowState,
+    WeeklyLootPlanStatus,
     job_uses_offhand,
 )
 
@@ -525,7 +527,10 @@ class WeeklyHierarchySnapshotEntry(Base):
 
 class LootPlan(Base):
     __tablename__ = "loot_plans"
-    __table_args__ = (UniqueConstraint("split_week_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("split_week_id", "name"),
+        UniqueConstraint("id", "split_week_id", name="uq_loot_plans_id_reclear_week"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     reclear_week_id: Mapped[int] = mapped_column(
         "split_week_id", ForeignKey("split_weeks.id"), nullable=False
@@ -534,10 +539,63 @@ class LootPlan(Base):
     state: Mapped[LootPlanState] = mapped_column(
         Enum(LootPlanState), default=LootPlanState.DRAFT, nullable=False
     )
+    mode: Mapped[ClearMode] = mapped_column(
+        Enum(ClearMode), default=ClearMode.REGULAR, nullable=False, index=True
+    )
+    status: Mapped[WeeklyLootPlanStatus] = mapped_column(
+        Enum(WeeklyLootPlanStatus),
+        default=WeeklyLootPlanStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    created_by_discord_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reclear_week: Mapped[ReclearWeek] = relationship()
+    runs: Mapped[list["LootPlanRun"]] = relationship(
+        back_populates="loot_plan", cascade="all, delete-orphan", order_by="LootPlanRun.run_number"
+    )
     assignments: Mapped[list["LootAssignment"]] = relationship(
         back_populates="loot_plan", cascade="all, delete-orphan"
     )
+
+
+class LootPlanRun(Base):
+    __tablename__ = "loot_plan_runs"
+    __table_args__ = (
+        UniqueConstraint("loot_plan_id", "run_number"),
+        UniqueConstraint("loot_plan_id", "name"),
+        UniqueConstraint("id", "loot_plan_id", name="uq_loot_plan_runs_id_plan"),
+        CheckConstraint("run_number > 0", name="positive_run_number"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    loot_plan_id: Mapped[int] = mapped_column(ForeignKey("loot_plans.id"), nullable=False)
+    run_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    loot_plan: Mapped[LootPlan] = relationship(back_populates="runs")
+    participants: Mapped[list["LootPlanParticipant"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+    assignments: Mapped[list["LootAssignment"]] = relationship(
+        back_populates="plan_run", overlaps="assignments,loot_plan"
+    )
+
+
+class LootPlanParticipant(Base):
+    __tablename__ = "loot_plan_participants"
+    __table_args__ = (UniqueConstraint("plan_run_id", "character_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_run_id: Mapped[int] = mapped_column(ForeignKey("loot_plan_runs.id"), nullable=False)
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"), nullable=False)
+    designation: Mapped[CharacterKind] = mapped_column(Enum(CharacterKind), nullable=False)
+    run: Mapped[LootPlanRun] = relationship(back_populates="participants")
+    character: Mapped[Character] = relationship()
 
 
 class LootAssignment(Base):
@@ -553,9 +611,34 @@ class LootAssignment(Base):
             "expected_drop_instance",
             name="uq_loot_assignment_expected_drop",
         ),
+        ForeignKeyConstraint(
+            ["plan_run_id", "loot_plan_id"],
+            ["loot_plan_runs.id", "loot_plan_runs.loot_plan_id"],
+            name="fk_loot_assignments_plan_run_plan",
+        ),
+        UniqueConstraint(
+            "plan_run_id",
+            "raid_floor_id",
+            "loot_type_id",
+            "expected_drop_instance",
+            name="uq_loot_assignment_run_expected_drop",
+        ),
+        CheckConstraint(
+            "paired_assignment_id IS NULL OR paired_assignment_id != id",
+            name="paired_assignment_not_self",
+        ),
+        CheckConstraint(
+            "disposition != 'ASSIGNED' OR intended_character_id IS NOT NULL",
+            name="assigned_has_recipient",
+        ),
+        CheckConstraint(
+            "intended_character_id IS NOT NULL OR recipient_designation IS NULL",
+            name="designation_requires_recipient",
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     loot_plan_id: Mapped[int] = mapped_column(ForeignKey("loot_plans.id"), nullable=False)
+    plan_run_id: Mapped[int | None] = mapped_column(Integer, index=True)
     reclear_group_id: Mapped[int | None] = mapped_column(ForeignKey("split_groups.id"))
     raid_floor_id: Mapped[int] = mapped_column(ForeignKey("raid_floors.id"), nullable=False)
     loot_type_id: Mapped[int] = mapped_column(ForeignKey("loot_types.id"), nullable=False)
@@ -570,12 +653,22 @@ class LootAssignment(Base):
     planning_reason: Mapped[str | None] = mapped_column(Text)
     recipient_owns_base_tome_item: Mapped[bool | None] = mapped_column(Boolean)
     hierarchy_position: Mapped[int | None] = mapped_column(Integer)
+    recipient_designation: Mapped[CharacterKind | None] = mapped_column(Enum(CharacterKind))
+    disposition: Mapped[PlannedLootDisposition] = mapped_column(
+        Enum(PlannedLootDisposition), default=PlannedLootDisposition.UNASSIGNED, nullable=False
+    )
+    paired_assignment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("loot_assignments.id"), unique=True
+    )
     state: Mapped[LootAssignmentState] = mapped_column(
         Enum(LootAssignmentState), default=LootAssignmentState.PROPOSED, nullable=False
     )
     manually_overridden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    loot_plan: Mapped[LootPlan] = relationship(back_populates="assignments")
+    loot_plan: Mapped[LootPlan] = relationship(back_populates="assignments", overlaps="assignments")
+    plan_run: Mapped[LootPlanRun | None] = relationship(
+        back_populates="assignments", overlaps="assignments,loot_plan"
+    )
     reclear_group: Mapped[ReclearGroup | None] = relationship()
     raid_floor: Mapped[RaidFloor] = relationship()
     loot_type: Mapped[LootType] = relationship()
@@ -589,6 +682,12 @@ class LootAssignment(Base):
     )
     final_recipient: Mapped[Character | None] = relationship(foreign_keys=[final_recipient_id])
     backup_recipient: Mapped[Character | None] = relationship(foreign_keys=[backup_recipient_id])
+    paired_assignment: Mapped["LootAssignment | None"] = relationship(
+        remote_side=[id], foreign_keys=[paired_assignment_id], post_update=True
+    )
+    material_grant: Mapped["ConfirmedReclearMaterialGrant | None"] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan", uselist=False
+    )
     confirmations: Mapped[list["LootConfirmation"]] = relationship(
         back_populates="assignment", cascade="all, delete-orphan"
     )
@@ -598,6 +697,34 @@ class LootAssignment(Base):
     completion_items: Mapped[list["LootAssignmentCompletionItem"]] = relationship(
         back_populates="assignment", cascade="all, delete-orphan"
     )
+
+
+class ConfirmedReclearMaterialGrant(Base):
+    """Bot-confirmed reclear grant history; manual week-one materials do not belong here."""
+
+    __tablename__ = "confirmed_reclear_material_grants"
+    __table_args__ = (
+        UniqueConstraint("loot_assignment_id"),
+        CheckConstraint("quantity > 0", name="positive_quantity"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    loot_assignment_id: Mapped[int] = mapped_column(
+        ForeignKey("loot_assignments.id"), nullable=False
+    )
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id"), nullable=False, index=True
+    )
+    augmentation_material_type_id: Mapped[int] = mapped_column(
+        ForeignKey("augmentation_material_types.id"), nullable=False, index=True
+    )
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    confirmed_by_discord_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    assignment: Mapped[LootAssignment] = relationship(back_populates="material_grant")
+    character: Mapped[Character] = relationship()
+    augmentation_material_type: Mapped[AugmentationMaterialType] = relationship()
 
 
 class LootAssignmentCompletionItem(Base):

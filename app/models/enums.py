@@ -62,6 +62,19 @@ class LootPlanState(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class WeeklyLootPlanStatus(StrEnum):
+    DRAFT = "DRAFT"
+    READY = "READY"
+    APPLIED = "APPLIED"
+    CANCELLED = "CANCELLED"
+
+
+class PlannedLootDisposition(StrEnum):
+    ASSIGNED = "ASSIGNED"
+    FREE_ROLL = "FREE_ROLL"
+    UNASSIGNED = "UNASSIGNED"
+
+
 class LootCategory(StrEnum):
     GEAR = "GEAR"
     COFFER = "COFFER"

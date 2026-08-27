@@ -53,7 +53,7 @@ def make_character(session: Session, *, suffix: str = "") -> Character:
 def test_tables_can_be_created(engine) -> None:
     actual_tables = set(inspect(engine).get_table_names())
     assert set(Base.metadata.tables) <= actual_tables
-    assert len(actual_tables) == 36
+    assert len(actual_tables) == 39
 
 
 def test_current_gear_has_no_tier_while_tier_owned_configuration_remains(engine) -> None:
