@@ -29,7 +29,7 @@ class Member(commands.Cog):
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             rows = [
-                f"{m.display_name} — {'active' if m.active else 'inactive'} — "
+                f"{m.display_name} â€” {'active' if m.active else 'inactive'} â€” "
                 + ", ".join(f"{c.name}@{c.world} ({c.job.abbreviation})" for c in m.characters)
                 for m in static.members
             ]

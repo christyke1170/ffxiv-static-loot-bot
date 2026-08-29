@@ -7,14 +7,10 @@ import pytest
 
 @pytest.mark.parametrize(
     "module_name",
-    [
-        "bot.commands.gear",
-        "bot.commands.resources",
-        "bot.commands.needs",
-        "bot.commands.gearboard",
-    ],
+    ["bot.commands.gear", "bot.commands.resources", "bot.commands.needs", "bot.commands.gearboard"],
 )
 async def test_extension_setup_loads_without_connecting(module_name):
+
     class FakeBot:
         def __init__(self):
             self.cogs = []

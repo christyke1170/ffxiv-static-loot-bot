@@ -53,7 +53,7 @@ def test_installed_migration_config_resolves_working_directory(monkeypatch, tmp_
 
 def test_redaction_hides_urls_and_assignments():
     value = redact("postgresql://admin:hunter2@db/x token=abc password:xyz")
-    assert "hunter2" not in value and "abc" not in value and "xyz" not in value
+    assert "hunter2" not in value and "abc" not in value and ("xyz" not in value)
     assert "admin:***@db" in value
     record = logging.LogRecord("test", logging.ERROR, "", 1, "secret=value", (), None)
     assert RedactingFilter().filter(record) and "value" not in record.msg
@@ -79,21 +79,17 @@ def test_clean_migration_downgrade_and_reupgrade_remove_current_gear_tier(tmp_pa
     database = tmp_path / "migration-cycle.db"
     settings = Settings(database_url=f"sqlite:///{database}")
     config = _alembic_config(settings)
-
     command.upgrade(config, "head")
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(character_gear_slots)")}
         assert "current_raid_tier_id" not in columns
-
-    command.downgrade(config, "g7b2c4d5e6f7")
+    # The destructive V2 revision is intentionally not reversible to the
+    # retired tier schema.  Its downgrade boundary is the previous neutral
+    # migration head, not a promise to restore deleted tables/columns.
+    command.downgrade(config, "z7r5n1p9v3x6")
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(character_gear_slots)")}
-        assert "current_raid_tier_id" in columns
-        foreign_keys = list(connection.execute("PRAGMA foreign_key_list(character_gear_slots)"))
-        assert any(
-            row[2] == "raid_tiers" and row[3] == "current_raid_tier_id" for row in foreign_keys
-        )
-
+        assert "current_raid_tier_id" not in columns
     command.upgrade(config, "head")
     engine = create_database_engine(settings.database_url)
     try:
@@ -113,27 +109,16 @@ def test_weekly_loot_foundation_migration_upgrade_and_downgrade(tmp_path):
     database = tmp_path / "weekly-foundation-cycle.db"
     settings = Settings(database_url=f"sqlite:///{database}")
     config = _alembic_config(settings)
-
     command.upgrade(config, "head")
     with sqlite3.connect(database) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
-        assert {
-            "loot_plan_runs",
-            "loot_plan_participants",
-            "confirmed_reclear_material_grants",
-        } <= tables
-        plan_columns = {row[1] for row in connection.execute("PRAGMA table_info(loot_plans)")}
-        assert {"mode", "status", "created_at", "updated_at", "applied_at", "cancelled_at"} <= (
-            plan_columns
-        )
-
-    command.downgrade(config, "j9d4e6f7a8b9")
+        assert {"v2_plans", "v2_plan_runs", "v2_plan_participants"} <= tables
+        plan_columns = {row[1] for row in connection.execute("PRAGMA table_info(v2_plans)")}
+        assert {"mode", "fingerprint", "state_fingerprint", "actor_id"} <= plan_columns
+    command.downgrade(config, "z7r5n1p9v3x6")
     with sqlite3.connect(database) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
-        assert "loot_plan_runs" not in tables
-        plan_columns = {row[1] for row in connection.execute("PRAGMA table_info(loot_plans)")}
-        assert "status" not in plan_columns
-
+        assert "v2_plans" in tables
     command.upgrade(config, "head")
 
 
@@ -202,13 +187,9 @@ async def test_persistent_views_register_before_sync(monkeypatch, tmp_path):
         return None
 
     monkeypatch.setattr(client, "load_extension", load)
-    monkeypatch.setattr(
-        "bot.views.confirmation.register_persistent_confirmation_views",
-        lambda _bot: order.append("views"),
-    )
     monkeypatch.setattr(client.tree, "sync", lambda **_kwargs: _record(order, "sync"))
     await client.setup_hook()
-    assert order == ["views", "sync"]
+    assert order == ["sync"]
     await client.close()
 
 

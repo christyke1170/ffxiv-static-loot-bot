@@ -5,8 +5,7 @@ from sqlalchemy import func, select
 from app.models import GearSlot, Job
 from app.services.seed import seed_reference_data
 from bot.checks import require_bot_admin
-from bot.services.commands import command_session, defer, reply, selected
-from bot.services.demo import create_demo_static, refresh_demo_static
+from bot.services.commands import command_session, defer, reply
 from bot.services.migrations import migration_head
 
 
@@ -62,54 +61,6 @@ class Setup(commands.Cog):
             f"Seed complete. Jobs: {result.inserted_jobs} inserted, "
             f"{result.existing_jobs} existing. "
             f"Gear slots: {result.inserted_slots} inserted, {result.existing_slots} existing.",
-            ephemeral=True,
-        )
-
-    @setup.command(name="demo", description="Create an isolated fictional eight-player demo")
-    @require_bot_admin(None)
-    async def demo(self, interaction):
-        await defer(interaction, ephemeral=True)
-        if interaction.guild is None:
-            raise ValueError("This command can only be used in a Discord guild.")
-        with command_session(self.bot) as session:
-            result = create_demo_static(
-                session,
-                interaction.guild.id,
-                interaction.guild.name,
-                interaction.user.id,
-            )
-        await reply(
-            interaction,
-            f"Created isolated **{result.static_name}** (fictional demo data): "
-            f"{result.member_count} active members, {result.character_count} active characters, "
-            f"four-floor tier `{result.tier_code}`, {result.bis_set_count} complete BiS sets, "
-            f"selected BiS for all characters, varied gear/resources, and hierarchy v"
-            f"{result.hierarchy_version}. No reclear week was created. The demo is now selected.\n"
-            "Next: `/gearboard`, `/needs floor`, then `/reclear setup` and `/reclear plan`.",
-            ephemeral=True,
-        )
-
-    @setup.command(
-        name="demo-refresh", description="Repair the selected verified fictional Loot Demo"
-    )
-    @require_bot_admin(None)
-    async def demo_refresh(self, interaction):
-        await defer(interaction, ephemeral=True)
-        if interaction.guild is None:
-            raise ValueError("This command can only be used in a Discord guild.")
-        with command_session(self.bot) as session:
-            result = refresh_demo_static(
-                session,
-                interaction.guild.id,
-                interaction.user.id,
-                selected(session, interaction),
-            )
-        await reply(
-            interaction,
-            f"Refreshed verified **{result.static_name}** in place. "
-            f"Counts: created {result.created}, updated {result.updated}, "
-            f"unchanged {result.unchanged}, rejected {result.rejected}. "
-            "The static was not deleted or recreated.",
             ephemeral=True,
         )
 

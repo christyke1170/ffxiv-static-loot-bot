@@ -30,23 +30,14 @@ class SetupPreviewView(discord.ui.LayoutView):
 
     def _build(self, preview: str | None = None, notice: str | None = None):
         self.clear_items()
-        text = preview or "Select exactly four members whose mains will join Split A."
+        text = preview or (
+            "Split groups will be selected automatically by the optimizer."
+            if self.mode is ClearMode.SPLIT
+            else "Review the Regular roster before creating the week."
+        )
         if notice:
             text += f"\n\n{notice}"
         self.add_item(discord.ui.Container(discord.ui.TextDisplay(text)))
-        if self.mode is ClearMode.SPLIT:
-            select = discord.ui.Select(
-                custom_id=f"rs:{self.static_id}:members",
-                placeholder="Choose four Split A mains",
-                min_values=4,
-                max_values=4,
-                options=[
-                    discord.SelectOption(label=m.display_name[:100], value=str(m.id))
-                    for m in self.members
-                ],
-            )
-            select.callback = self.reselect
-            self.add_item(discord.ui.ActionRow(select))
         confirm = discord.ui.Button(
             label="Confirm", style=discord.ButtonStyle.success, custom_id=f"rs:{self.static_id}:ok"
         )
@@ -57,14 +48,7 @@ class SetupPreviewView(discord.ui.LayoutView):
         )
         confirm.callback = self.confirm
         cancel.callback = self.cancel
-        if self.mode is ClearMode.SPLIT:
-            reselect = discord.ui.Button(
-                label="Reselect", custom_id=f"rs:{self.static_id}:reselect"
-            )
-            reselect.callback = self.reset_selection
-            self.add_item(discord.ui.ActionRow(confirm, reselect, cancel))
-        else:
-            self.add_item(discord.ui.ActionRow(confirm, cancel))
+        self.add_item(discord.ui.ActionRow(confirm, cancel))
 
     async def interaction_check(self, interaction):
         if not is_raid_leader(interaction, None):
@@ -87,11 +71,6 @@ class SetupPreviewView(discord.ui.LayoutView):
         await interaction.response.edit_message(view=self)
 
     async def confirm(self, interaction):
-        if self.mode is ClearMode.SPLIT and len(self.selected_ids) != 4:
-            await interaction.response.send_message(
-                "Select exactly four members first.", ephemeral=True
-            )
-            return
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             if static.id != self.static_id:
@@ -100,6 +79,7 @@ class SetupPreviewView(discord.ui.LayoutView):
                 session,
                 static,
                 self.mode,
+                # Split membership is deliberately left to the V2 optimizer.
                 split_a_main_member_ids=self.selected_ids or None,
                 notes=self.notes,
                 actor_discord_user_id=interaction.user.id,

@@ -4,9 +4,10 @@ import json
 from contextlib import contextmanager
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from bot.services.admin import selected_static
+from app.models import DiscordGuild, UserStaticPreference
 
 MAX_ATTACHMENT_BYTES = 1024 * 1024
 PAGE_SIZE = 10
@@ -34,7 +35,17 @@ def guild_context(interaction: Any) -> tuple[int, int]:
 
 def selected(session: Session, interaction: Any):
     guild_id, user_id = guild_context(interaction)
-    return selected_static(session, guild_id, user_id)
+    row = session.scalar(
+        select(UserStaticPreference)
+        .join(DiscordGuild, UserStaticPreference.guild_id == DiscordGuild.id)
+        .where(
+            DiscordGuild.discord_guild_id == guild_id,
+            UserStaticPreference.discord_user_id == user_id,
+        )
+    )
+    if row is None or row.static.guild.discord_guild_id != guild_id:
+        raise ValueError("Select a static first with `/static select`.")
+    return row.static
 
 
 async def defer(interaction: Any, *, ephemeral: bool = False) -> None:

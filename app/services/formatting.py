@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 from app.models import GearClassification
 from app.schemas.board import BoardPlayer, DisplayStatus, StaticGearBoard
-from app.schemas.needs import NeedStatus
+from app.schemas.needs_v2 import NeedsV2Status
 
 DISCORD_TEXT_LIMIT = 2000
 PLAYERS_PER_PAGE = 4
@@ -207,7 +207,7 @@ def summary_table(board: StaticGearBoard) -> tuple[str, tuple[str, ...]]:
     for player in board.players:
         for slot in player.slots:
             if (
-                slot.needs_status is NeedStatus.NEEDS_SAVAGE_DROP
+                slot.needs_status is NeedsV2Status.NEEDS_SAVAGE_DROP
                 and slot.required_floor_number is not None
             ):
                 label = loot_type_label(slot.required_loot_type_code, slot.code.value)

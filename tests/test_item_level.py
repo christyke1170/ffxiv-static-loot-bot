@@ -46,7 +46,7 @@ def item_level_character(session):
     session.add(character)
     initialize_character_gear(session, character)
     session.commit()
-    return static, character
+    return (static, character)
 
 
 @pytest.mark.parametrize(

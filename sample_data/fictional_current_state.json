@@ -10,14 +10,14 @@
         },
         {
           "slot": "HEAD",
-          "current_classification": "CRAFTED"
+          "current_classification": "CRAFTED_EX"
         }
       ],
       "inventory_items": [
         {
-          "item": "Fictional Tome Cuirass",
-          "quantity": 1,
-          "item_level": 720
+          "slot": "BODY",
+          "classification": "TOME",
+          "quantity": 1
         }
       ],
       "books": [

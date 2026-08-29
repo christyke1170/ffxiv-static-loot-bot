@@ -10,15 +10,11 @@ from app.models import (
     AuditLog,
     BisSet,
     Character,
-    CharacterBisSelection,
     CharacterKind,
     DiscordGuild,
     Job,
     JobHierarchy,
     JobHierarchyEntry,
-    LootAssignment,
-    LootPlan,
-    RaidTier,
     ReclearParticipant,
     ReclearWeek,
     ReclearWorkflowState,
@@ -27,6 +23,7 @@ from app.models import (
     UserStaticPreference,
 )
 from app.services.character_gear import initialize_character_gear, reconcile_character_offhand
+from app.services.hierarchy import ensure_default_hierarchy
 
 OPEN_WORKFLOW_STATES = tuple(
     state
@@ -59,6 +56,7 @@ def create_static(session: Session, guild_id: int, name: str, crafted_item_level
     row = Static(guild_id=guild_id, name=name, crafted_item_level=crafted_item_level)
     session.add(row)
     session.flush()
+    ensure_default_hierarchy(session, row)
     return row
 
 
@@ -322,20 +320,15 @@ def edit_character(
     )
     if duplicate:
         raise ValueError("That character name/world already exists.")
-    incompatible = [s for s in character.bis_selections if s.bis_set.job_id != job.id]
-    if incompatible and not clear_incompatible_bis:
-        raise ValueError(
-            "The new job is incompatible with selected BiS set(s); retry with "
-            "clear_incompatible_bis=true to clear them explicitly."
-        )
+    # BiS ownership is Static + Job in V2.  Characters no longer carry
+    # selections that need to be cleared when their job changes.
+    incompatible = ()
     before = {
         "name": character.name,
         "world": character.world,
         "kind": character.kind.value,
         "job": character.job.abbreviation,
     }
-    for selection in incompatible:
-        session.delete(selection)
     character.name = values["name"]
     character.world = values["world"]
     character.kind = values["kind"]
@@ -405,65 +398,13 @@ def set_character_active(
     return character
 
 
-def select_bis(
-    session: Session, character: Character, tier: RaidTier, bis_set: BisSet
-) -> SelectionChange:
-    if bis_set.raid_tier_id != tier.id or bis_set.job_id != character.job_id:
-        raise ValueError("The BiS set must match the character job and raid tier.")
-    row = session.scalar(
-        select(CharacterBisSelection).where(
-            CharacterBisSelection.character_id == character.id,
-            CharacterBisSelection.raid_tier_id == tier.id,
-        )
-    )
-    if row is None:
-        session.add(CharacterBisSelection(character=character, raid_tier=tier, bis_set=bis_set))
-        return SelectionChange(None, bis_set, True)
-    else:
-        old = row.bis_set
-        if row.bis_set_id == bis_set.id:
-            return SelectionChange(old, bis_set, False)
-        row.bis_set_id = bis_set.id
-        return SelectionChange(old, bis_set, True)
+def select_bis(session: Session, character: Character, bis_set: BisSet) -> SelectionChange:
+    raise ValueError("Character-specific BiS selections are retired; configure Static + Job BiS.")
 
 
-def clear_bis(
-    session: Session, static: Static, character: Character, tier: RaidTier
-) -> SelectionChange:
+def clear_bis(session: Session, static: Static, character: Character) -> SelectionChange:
     _require_character_in_static(static, character)
-    row = session.scalar(
-        select(CharacterBisSelection).where(
-            CharacterBisSelection.character_id == character.id,
-            CharacterBisSelection.raid_tier_id == tier.id,
-        )
-    )
-    if row is None:
-        return SelectionChange(None, None, False)
-    if _character_in_open_workflow(session, character.id):
-        raise ValueError("An active unfinished reclear depends on this BiS selection.")
-    old = row.bis_set
-    session.delete(row)
-    return SelectionChange(old, None, True)
-
-
-def select_tier(static: Static, tier: RaidTier) -> SelectionChange:
-    if not static.active:
-        raise ValueError("A deactivated static cannot be used for new planning.")
-    old = static.active_raid_tier
-    if old is tier or (old is not None and old.id == tier.id):
-        return SelectionChange(old, tier, False)
-    static.active_raid_tier = tier
-    return SelectionChange(old, tier, True)
-
-
-def clear_tier(session: Session, static: Static) -> SelectionChange:
-    old = static.active_raid_tier
-    if old is None:
-        return SelectionChange(None, None, False)
-    if _open_week(session, static.id) is not None:
-        raise ValueError("An active unfinished reclear depends on the tier selection.")
-    static.active_raid_tier = None
-    return SelectionChange(old, None, True)
+    raise ValueError("Character-specific BiS selections are retired; configure Static + Job BiS.")
 
 
 def set_hierarchy(
@@ -477,15 +418,7 @@ def set_hierarchy(
     if unknown:
         raise ValueError("Unknown jobs: " + ", ".join(unknown))
     if not force:
-        required = {
-            selection.bis_set.job.abbreviation.upper()
-            for member in static.members
-            if member.active
-            for character in member.characters
-            if character.active and character.kind is CharacterKind.MAIN
-            for selection in character.bis_selections
-            if static.active_raid_tier_id == selection.raid_tier_id
-        }
+        required = set()
         missing = sorted(required - set(jobs))
         if missing:
             raise ValueError("Hierarchy is missing active main jobs: " + ", ".join(missing))
@@ -536,24 +469,7 @@ def _character_in_open_workflow(session: Session, character_id: int) -> bool:
         )
         .limit(1)
     )
-    if participant is not None:
-        return True
-    assignment = session.scalar(
-        select(LootAssignment.id)
-        .join(LootPlan)
-        .join(ReclearWeek)
-        .where(
-            ReclearWeek.workflow_state.in_(OPEN_WORKFLOW_STATES),
-            (
-                (LootAssignment.intended_character_id == character_id)
-                | (LootAssignment.suggested_recipient_id == character_id)
-                | (LootAssignment.final_recipient_id == character_id)
-                | (LootAssignment.backup_recipient_id == character_id)
-            ),
-        )
-        .limit(1)
-    )
-    return assignment is not None
+    return participant is not None
 
 
 def _require_character_in_static(static: Static, character: Character) -> None:

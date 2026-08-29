@@ -1,9 +1,11 @@
 from discord import app_commands
 from discord.ext import commands
 
-from app.schemas.needs import NeedStatus
-from app.services.board import build_static_gear_board
-from app.services.formatting import player_table, safe_text
+from app.models import CharacterKind
+from app.schemas.needs_v2 import NeedsV2Status
+from app.services.formatting import safe_text
+from app.services.needs_formatting import format_needs_player
+from app.services.needs_v2 import calculate_character_needs_v2
 from bot.services.commands import command_session, defer, reply, selected
 from bot.services.gear import character
 
@@ -14,8 +16,38 @@ class Needs(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def board(self, session, interaction):
-        return build_static_gear_board(session, selected(session, interaction).id)
+    @staticmethod
+    def _characters(static):
+        return sorted(
+            (
+                character
+                for member in static.members
+                if member.active
+                for character in member.characters
+                if character.active and character.kind is CharacterKind.MAIN
+            ),
+            key=lambda row: (row.static_member_id, row.id),
+        )
+
+    @staticmethod
+    def _player_line(result):
+        return (
+            f"{safe_text(result.character_name)} ({safe_text(result.job_abbreviation or '?')}) â€” "
+            f"{result.complete_slot_count}/{result.applicable_slot_count} applicable slots"
+        )
+
+    @classmethod
+    def _warning_text(cls, results):
+        warnings = tuple(
+            dict.fromkeys(
+                warning for result in results for warning in result.configuration_warnings
+            )
+        )
+        return (
+            "\nWarnings:\n" + "\n".join(f"- {safe_text(item)}" for item in warnings)
+            if warnings
+            else ""
+        )
 
     @group.command(name="player")
     async def player(self, interaction, character_name: str):
@@ -23,76 +55,82 @@ class Needs(commands.Cog):
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             target = character(session, static, character_name)
-            board = build_static_gear_board(session, static.id)
-            player = next(row for row in board.players if row.character_id == target.id)
-            table, warnings = player_table(player)
-        await reply(interaction, table + ("\nWarnings: " + "; ".join(warnings) if warnings else ""))
+            result = calculate_character_needs_v2(session, target.id)
+        await reply(interaction, format_needs_player(result))
 
     @group.command(name="floor")
     async def floor(self, interaction, floor_number: int):
         await defer(interaction)
         with command_session(self.bot) as session:
-            board = self.board(session, interaction)
+            static = selected(session, interaction)
+            results = tuple(
+                calculate_character_needs_v2(session, row.id) for row in self._characters(static)
+            )
             lines = []
-            for player in board.players:
-                for slot in player.slots:
-                    if (
-                        slot.required_floor_number == floor_number
-                        and slot.required_loot_type
-                        and slot.needs_status
-                        not in {
-                            NeedStatus.COMPLETE,
-                            NeedStatus.MANUALLY_COMPLETE,
-                            NeedStatus.NOT_APPLICABLE,
-                        }
-                    ):
+            for result in results:
+                for slot in result.slot_results:
+                    if slot.required_floor_number == floor_number and slot.status not in {
+                        NeedsV2Status.COMPLETE,
+                        NeedsV2Status.MANUALLY_COMPLETE,
+                        NeedsV2Status.NOT_APPLICABLE,
+                    }:
                         lines.append(
-                            f"{safe_text(player.display_name)} — {safe_text(slot.name)} — "
-                            f"{safe_text(slot.required_loot_type)}"
+                            f"{safe_text(result.character_name)} — {safe_text(slot.slot_name)} — "
+                            f"{safe_text(slot.required_loot_type_code or 'configured need')}"
                         )
+            warnings = self._warning_text(results)
         await reply(
             interaction,
             f"Floor {floor_number} configured loot needs\n"
-            + ("\n".join(lines) or "No matching needs."),
+            + ("\n".join(lines) or "No matching needs.")
+            + warnings,
         )
 
     @group.command(name="augment")
     async def augment(self, interaction):
         await defer(interaction)
         with command_session(self.bot) as session:
-            board = self.board(session, interaction)
+            static = selected(session, interaction)
+            results = tuple(
+                calculate_character_needs_v2(session, row.id) for row in self._characters(static)
+            )
             lines = [
-                f"{safe_text(player.display_name)} — "
+                f"{self._player_line(result)} â€” "
                 + (
                     ", ".join(
-                        f"{row.code}: owned {row.owned}, need {row.needed}"
-                        for row in player.materials
+                        f"{safe_text(row.material_name)}: owned {row.owned}, "
+                        f"allocated {row.allocated}, additionally needed {row.additional_needed}"
+                        for row in result.material_needs
                     )
                     or "none"
                 )
-                for player in board.players
+                for result in results
             ]
-        await reply(interaction, "Augmentation materials\n" + "\n".join(lines))
+            warnings = self._warning_text(results)
+        await reply(interaction, "Augmentation materials\n" + "\n".join(lines) + warnings)
 
     @group.command(name="books")
     async def books(self, interaction):
         await defer(interaction)
         with command_session(self.bot) as session:
-            board = self.board(session, interaction)
+            static = selected(session, interaction)
+            results = tuple(
+                calculate_character_needs_v2(session, row.id) for row in self._characters(static)
+            )
             lines = [
-                f"{safe_text(player.display_name)} — "
-                + (
-                    ", ".join(
-                        f"F{row.floor_number}: {row.earned}-{row.spent}+"
-                        f"{row.manual_adjustment}={row.available}, "
-                        f"remaining {row.remaining_required}"
-                        for row in player.books
-                    )
-                    or "none"
+                f"{self._player_line(result)} â€” "
+                + ", ".join(
+                    f"Floor {row.floor_number}: {row.available}" for row in result.book_balances
                 )
-                for player in board.players
+                for result in results
             ]
-        await reply(interaction, "Book balances\n" + "\n".join(lines))
+            warnings = self._warning_text(results)
+        await reply(
+            interaction,
+            "Book balances (informational; administrator spending is recorded manually)\n"
+            + "\n".join(lines)
+            + warnings,
+        )
 
 
 async def setup(bot):

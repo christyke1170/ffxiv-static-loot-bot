@@ -53,6 +53,9 @@ ERROR_TYPE = sa.Enum(
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    for enum_type in (CLEAR_MODE, WORKFLOW_STATE):
+        enum_type.create(bind, checkfirst=True)
     op.add_column("statics", sa.Column("active_raid_tier_id", sa.Integer()))
     with op.batch_alter_table("statics") as batch:
         batch.create_foreign_key(
@@ -88,7 +91,7 @@ def upgrade() -> None:
             "fk_bis_set_items_base_tome_item_id_items", "items", ["base_tome_item_id"], ["id"]
         )
         batch.create_foreign_key(
-            "fk_bis_set_items_augmentation_material_type_id_augmentation_material_types",
+            "fk_bis_items_augmentation_material",
             "augmentation_material_types",
             ["augmentation_material_type_id"],
             ["id"],
@@ -138,7 +141,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("version > 0", name="positive_version"),
         sa.CheckConstraint(
-            "active_marker IS NULL OR active_marker = 1",
+            "active_marker IS NULL OR active_marker IS TRUE",
             name="valid_active_marker",
         ),
         sa.UniqueConstraint("static_id", "version", name="uq_job_hierarchies_static_version"),
@@ -241,12 +244,25 @@ def upgrade() -> None:
             )
         )
     op.execute("UPDATE loot_assignments SET intended_character_id = character_id")
+    if bind.dialect.name == "postgresql":
+        # PostgreSQL cannot assign the text CASE result to the legacy enum.
+        bind.exec_driver_sql(
+            "ALTER TABLE loot_assignments ALTER COLUMN state TYPE VARCHAR(20) USING state::text"
+        )
     op.execute(
         "UPDATE loot_assignments SET state = CASE state WHEN 'RECEIVED' THEN 'RECEIVED' "
         "WHEN 'CANCELLED' THEN 'CANCELLED' ELSE 'PROPOSED' END"
     )
+    if bind.dialect.name == "postgresql":
+        bind.exec_driver_sql("DROP TYPE lootassignmentstate")
+        ASSIGNMENT_STATE.create(bind)
+        bind.exec_driver_sql(
+            "ALTER TABLE loot_assignments ALTER COLUMN state "
+            "TYPE lootassignmentstate USING state::lootassignmentstate"
+        )
     with op.batch_alter_table("loot_assignments") as batch:
-        batch.alter_column("state", existing_type=sa.String(9), type_=ASSIGNMENT_STATE)
+        if bind.dialect.name != "postgresql":
+            batch.alter_column("state", existing_type=sa.String(9), type_=ASSIGNMENT_STATE)
         batch.drop_constraint("fk_loot_assignments_character_id_characters", type_="foreignkey")
         batch.drop_column("character_id")
         for column, target in (

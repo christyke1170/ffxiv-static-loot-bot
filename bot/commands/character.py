@@ -138,8 +138,8 @@ class Character(commands.Cog):
                 m for m in static.members if member is None or m.discord_user_id == member.id
             ]
             rows = [
-                f"{c.name}@{c.world} — {c.job.abbreviation} — "
-                f"{c.kind} — {'active' if c.active else 'inactive'}"
+                f"{c.name}@{c.world} â€” {c.job.abbreviation} â€” "
+                f"{c.kind} â€” {'active' if c.active else 'inactive'}"
                 for m in members
                 for c in m.characters
                 if kind is None or c.kind.value == kind.upper()

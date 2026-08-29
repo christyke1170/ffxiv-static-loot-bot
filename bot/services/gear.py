@@ -4,12 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    AugmentationMaterialType,
     Character,
     CharacterKind,
     GearClassification,
     GearSlot,
-    RaidFloor,
     Static,
     StaticMember,
 )
@@ -83,30 +81,3 @@ def classification(value: str, target_slot: GearSlot | None = None) -> GearClass
     if result not in CURRENT_CLASSIFICATIONS:
         raise ValueError("NOT_APPLICABLE is only valid for desired BiS configuration.")
     return result
-
-
-def material(session: Session, static: Static, value: str) -> AugmentationMaterialType:
-    if static.active_raid_tier_id is None:
-        raise ValueError("The selected static has no active tier.")
-    row = session.scalar(
-        select(AugmentationMaterialType).where(
-            AugmentationMaterialType.raid_tier_id == static.active_raid_tier_id,
-            AugmentationMaterialType.code == value.strip().upper(),
-        )
-    )
-    if row is None:
-        raise ValueError(f"Unknown active-tier augmentation material: {value}.")
-    return row
-
-
-def floor(session: Session, static: Static, value: int) -> RaidFloor:
-    if static.active_raid_tier_id is None:
-        raise ValueError("The selected static has no active tier.")
-    row = session.scalar(
-        select(RaidFloor).where(
-            RaidFloor.raid_tier_id == static.active_raid_tier_id, RaidFloor.floor_number == value
-        )
-    )
-    if row is None:
-        raise ValueError(f"Unknown active-tier floor: {value}.")
-    return row

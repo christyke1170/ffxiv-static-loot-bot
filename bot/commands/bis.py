@@ -1,19 +1,11 @@
-import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
 
-from app.models import BisSet, Character, CharacterBisSelection, RaidTier
-from app.services.imports import import_bis_sets
+from app.models import GearSlot
 from bot.checks import require_raid_leader
-from bot.services.admin import clear_bis, select_bis
-from bot.services.commands import (
-    command_session,
-    defer,
-    read_json_attachment,
-    reply,
-    selected,
-)
+from bot.services.bis import resolve_job, summarize_bis
+from bot.services.commands import command_session, defer, reply, selected
+from bot.views.bis import BisClearView, BisEditorView
 
 
 class Bis(commands.Cog):
@@ -22,123 +14,65 @@ class Bis(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @group.command(name="import")
+    @group.command(name="set", description="Configure category-only BiS for a job")
     @require_raid_leader(None)
-    async def import_bis(self, interaction, attachment: discord.Attachment):
-        await defer(interaction, ephemeral=True)
-        data = await read_json_attachment(attachment)
-        with command_session(self.bot) as session:
-            import_bis_sets(session, data, dry_run=True)
-        with command_session(self.bot) as session:
-            rows = import_bis_sets(session, data)
-            count = sum(len(row.items) for row in rows)
-            counts = rows.counts
-        await reply(
-            interaction,
-            f"Imported {len(rows)} BiS sets and {count} items. "
-            f"Counts: inserted {counts.inserted}, updated {counts.updated}, "
-            f"unchanged {counts.unchanged}, rejected {counts.rejected}; "
-            f"{len(rows)} accepted set(s), {count} item(s)."
-            + (" Referenced definitions were retained unchanged." if counts.rejected else ""),
-            ephemeral=True,
-        )
-
-    @group.command(name="select")
-    @require_raid_leader(None)
-    async def select(self, interaction, character: str, bis_set: str, tier: str | None = None):
+    async def set(self, interaction, job: str):
         await defer(interaction, ephemeral=True)
         with command_session(self.bot) as session:
             static = selected(session, interaction)
-            member_ids = [member.id for member in static.members]
-            character_row = session.scalar(
-                select(Character).where(
-                    Character.name == character, Character.static_member_id.in_(member_ids)
-                )
+            job_row = resolve_job(session, job)
+            view = BisEditorView(
+                self.bot, static.id, job_row.id, interaction.user.id, interaction.guild.id
             )
-            if character_row is None:
-                raise ValueError("Character is not in the selected static.")
-            tier_row = (
-                static.active_raid_tier
-                if tier is None
-                else session.scalar(
-                    select(RaidTier).where((RaidTier.code == tier) | (RaidTier.name == tier))
-                )
-            )
-            if tier_row is None:
-                raise ValueError("Unknown raid tier.")
-            set_row = session.scalar(
-                select(BisSet).where(BisSet.raid_tier_id == tier_row.id, BisSet.name == bis_set)
-            )
-            if set_row is None:
-                raise ValueError("Unknown BiS set for that tier.")
-            change = select_bis(session, character_row, tier_row, set_row)
-            old = change.old.name if change.old else "none"
-            status = "unchanged" if not change.changed else "replaced"
-        await reply(
-            interaction,
-            f"BiS selection {status}: {discord.utils.escape_markdown(old)} → "
-            f"{discord.utils.escape_markdown(set_row.name)}.",
-            ephemeral=True,
-        )
+        await interaction.followup.send(view.content, view=view, ephemeral=True)
 
-    @group.command(name="clear", description="Clear a BiS selection when no workflow depends on it")
+    @group.command(name="show", description="Show category-only BiS for a job")
     @require_raid_leader(None)
-    async def clear(self, interaction, character: str, tier: str | None = None):
+    async def show(self, interaction, job: str):
         await defer(interaction, ephemeral=True)
         with command_session(self.bot) as session:
             static = selected(session, interaction)
-            member_ids = [member.id for member in static.members]
-            character_row = session.scalar(
-                select(Character).where(
-                    Character.name == character, Character.static_member_id.in_(member_ids)
+            job_row = resolve_job(session, job)
+            summary = summarize_bis(session, static, job_row)
+            if summary.bis_set is None:
+                text = (
+                    f"No BiS is configured for {job_row.abbreviation} in {static.name}. "
+                    "Use /bis set."
                 )
-            )
-            if character_row is None:
-                raise ValueError("Character is not in the selected static.")
-            tier_row = (
-                static.active_raid_tier
-                if tier is None
-                else session.scalar(
-                    select(RaidTier).where((RaidTier.code == tier) | (RaidTier.name == tier))
-                )
-            )
-            if tier_row is None:
-                raise ValueError("Unknown raid tier.")
-            change = clear_bis(session, static, character_row, tier_row)
-            old = change.old.name if change.old else "none"
-        await reply(
-            interaction,
-            f"BiS selection {'cleared' if change.changed else 'unchanged'}: "
-            f"{discord.utils.escape_markdown(old)} → none.",
-            ephemeral=True,
-        )
-
-    @group.command(name="show")
-    async def show(self, interaction, character: str):
-        await defer(interaction)
-        with command_session(self.bot) as session:
-            static = selected(session, interaction)
-            row = session.scalar(
-                select(CharacterBisSelection).where(
-                    CharacterBisSelection.character.has(
-                        (Character.name == character)
-                        & Character.static_member_id.in_([member.id for member in static.members])
-                    )
-                )
-            )
-            if row is None:
-                raise ValueError("No BiS selection found.")
-            text = "\n".join(
-                [
-                    f"Character: {row.character.name}",
-                    f"Job: {row.character.job.abbreviation}",
-                    f"Set: {row.bis_set.name}",
-                    f"GCD: {row.bis_set.gcd_label or 'none'}",
-                    f"Link: {row.bis_set.gear_set_url or 'none'}",
-                    f"Desired slots: {len(row.bis_set.items)}",
+            else:
+                items = {
+                    item.gear_slot.display_name: item.classification.value
+                    for item in summary.bis_set.items
+                }
+                slot_count = session.query(GearSlot).count()
+                complete = len(items) == slot_count
+                lines = [
+                    f"Static: {static.name}",
+                    f"Job: {job_row.abbreviation}",
+                    f"Offhand applicable: {'yes' if job_row.uses_offhand else 'no'}",
+                    f"Complete: {'yes' if complete else 'no'}",
+                    f"Active Mains: {summary.main_count}",
+                    f"Active Alts: {summary.alt_count}",
                 ]
+                lines.extend(f"{slot}: {category}" for slot, category in items.items())
+                text = "\n".join(lines)
+        await reply(interaction, text, ephemeral=True)
+
+    @group.command(name="clear", description="Clear category-only BiS for a job")
+    @require_raid_leader(None)
+    async def clear(self, interaction, job: str):
+        await defer(interaction, ephemeral=True)
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            job_row = resolve_job(session, job)
+            if summarize_bis(session, static, job_row).bis_set is None:
+                raise ValueError(
+                    f"No BiS is configured for {job_row.abbreviation} in {static.name}."
+                )
+            view = BisClearView(
+                self.bot, static.id, job_row.id, interaction.user.id, interaction.guild.id
             )
-        await reply(interaction, text)
+        await interaction.followup.send(view.content, view=view, ephemeral=True)
 
 
 async def setup(bot):

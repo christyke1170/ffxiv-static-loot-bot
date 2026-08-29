@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import GearSlot, GearSlotCode, Job
+from app.services.hierarchy import bootstrap_default_hierarchies
 
 GEAR_SLOTS = [
     (GearSlotCode.WEAPON, "Weapon"),
@@ -77,6 +78,7 @@ def seed_reference_data(session: Session) -> SeedResult:
             else:
                 existing_jobs[abbreviation].uses_offhand = uses_offhand
     session.flush()
+    bootstrap_default_hierarchies(session)
     return SeedResult(
         inserted_slots,
         len(GEAR_SLOTS) - inserted_slots,

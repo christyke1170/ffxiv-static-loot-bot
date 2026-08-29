@@ -97,7 +97,6 @@ class Static(commands.Cog):
             row = __import__("bot.services.admin", fromlist=["selected_static"]).selected_static(
                 session, *guild_context(interaction)
             )
-            active = row.active_raid_tier.name if row.active_raid_tier else "none"
             hierarchy = row.job_hierarchies and next(
                 (h for h in row.job_hierarchies if h.active), None
             )
@@ -107,7 +106,6 @@ class Static(commands.Cog):
                 (
                     f"**{discord.utils.escape_markdown(row.name)}**",
                     f"Active: {row.active}",
-                    f"Tier: {active}",
                     f"Crafted item level: {row.crafted_item_level or 'not configured'}",
                     f"Members: {len(row.members)}",
                     f"Hierarchy: {jobs}",

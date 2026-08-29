@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from app.models import GearClassification, GearSlotCode
-from app.schemas.needs import NeedStatus
+from app.schemas.needs_v2 import NeedsV2Status
 
 
 class DisplayStatus(StrEnum):
@@ -24,7 +24,6 @@ class BoardBook:
     spent: int
     manual_adjustment: int
     available: int
-    remaining_required: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +41,7 @@ class BoardSlot:
     sort_order: int
     desired_classification: GearClassification | None
     current_classification: GearClassification | None
-    needs_status: NeedStatus
+    needs_status: NeedsV2Status
     display_status: DisplayStatus
     required_floor_number: int | None
     required_loot_type: str | None
@@ -60,7 +59,6 @@ class BoardPlayer:
     character_kind: str
     job: str | None
     bis_set: str | None
-    gear_set_url: str | None
     slots: tuple[BoardSlot, ...]
     books: tuple[BoardBook, ...]
     materials: tuple[BoardMaterial, ...]
@@ -76,8 +74,6 @@ class StaticGearBoard:
     static_id: int
     static_name: str
     guild_id: int
-    tier_id: int
-    tier_name: str
     member_discord_user_ids: tuple[int, ...]
     players: tuple[BoardPlayer, ...]
     refreshed_at: datetime

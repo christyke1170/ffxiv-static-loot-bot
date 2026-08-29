@@ -6,16 +6,16 @@ from sqlalchemy.orm import joinedload
 
 from app.models import (
     Character,
-    CharacterFloorBookBalance,
     CharacterGearSlot,
     GearClassification,
     GearSlot,
     GearSlotCode,
-    RaidFloor,
     Static,
+    V2ResourceBalance,
 )
 from app.services.formatting import SLOT_LABEL
-from app.services.gear import clear_gear, set_available_books, set_gear
+from app.services.gear import clear_gear, set_gear
+from app.services.neutral_resources import set_current_balance
 from bot.checks import is_raid_leader
 from bot.services.commands import command_session, selected
 
@@ -70,14 +70,8 @@ class BookAdjustmentModal(discord.ui.Modal):
         try:
             with command_session(self.editor.bot) as session:
                 static, character = self.editor._validated_target(session, interaction)
-                set_available_books(
-                    session,
-                    static,
-                    character,
-                    desired,
-                    interaction.user.id,
-                    maximum=MAX_BOOK_BALANCE,
-                )
+                for floor_id, value in desired.items():
+                    set_current_balance(session, static, character, f"BOOK_FLOOR_{floor_id}", value)
         except ValueError:
             await interaction.response.send_message(
                 "You cannot use this gear editor.", ephemeral=True
@@ -171,23 +165,13 @@ class GearEditorView(discord.ui.View):
             static = session.get(Static, self.static_id)
             if static is None:
                 raise ValueError("This gear editor is stale.")
-            floors = (
-                list(
-                    session.scalars(
-                        select(RaidFloor)
-                        .where(RaidFloor.raid_tier_id == static.active_raid_tier_id)
-                        .order_by(RaidFloor.floor_number)
-                    )
-                )
-                if static.active_raid_tier_id is not None
-                else []
-            )
             balances = {
-                row.raid_floor_id: row.available
+                int(row.resource_key.removeprefix("BOOK_FLOOR_")): row.quantity
                 for row in session.scalars(
-                    select(CharacterFloorBookBalance).where(
-                        CharacterFloorBookBalance.character_id == self.character_id,
-                        CharacterFloorBookBalance.raid_floor_id.in_([floor.id for floor in floors]),
+                    select(V2ResourceBalance).where(
+                        V2ResourceBalance.static_id == self.static_id,
+                        V2ResourceBalance.recipient_id == self.character_id,
+                        V2ResourceBalance.resource_key.like("BOOK_FLOOR_%"),
                     )
                 )
             }
@@ -198,9 +182,7 @@ class GearEditorView(discord.ui.View):
                 character.job.uses_offhand,
                 slots,
                 current,
-                tuple(
-                    (floor.id, floor.floor_number, balances.get(floor.id, 0)) for floor in floors
-                ),
+                tuple((number, number, balances.get(number, 0)) for number in range(1, 5)),
             )
 
     def _build(self, notice: str | None = None) -> None:
@@ -259,7 +241,7 @@ class GearEditorView(discord.ui.View):
         self.add_item(close)
         selected_label = SLOT_LABEL[self.selected_slot.value] if self.selected_slot else "None"
         self.content = (
-            f"**{discord.utils.escape_markdown(name)} · {kind} · {job}**\n"
+            f"**{discord.utils.escape_markdown(name)} Â· {kind} Â· {job}**\n"
             f"Selected slot: **{selected_label}**\n\n"
             "**Books**\n"
             + (
@@ -268,7 +250,7 @@ class GearEditorView(discord.ui.View):
             )
         )
         if selected_is_na:
-            self.content += " — **N/A for this job**"
+            self.content += " â€” **N/A for this job**"
         if notice:
             self.content += f"\n{notice}"
         assert len(list(self.walk_children())) <= MAX_COMPONENTS

@@ -17,6 +17,10 @@ CLEAR_MODE = sa.Enum("REGULAR", "SPLIT", name="clearmode")
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        PLAN_STATUS.create(bind, checkfirst=True)
+        DISPOSITION.create(bind, checkfirst=True)
     with op.batch_alter_table("loot_plans") as batch:
         batch.create_unique_constraint("uq_loot_plans_id_reclear_week", ["id", "split_week_id"])
         batch.add_column(sa.Column("mode", CLEAR_MODE, server_default="REGULAR", nullable=False))
@@ -59,8 +63,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["loot_plan_id"], ["loot_plans.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("id", "loot_plan_id", name="uq_loot_plan_runs_id_plan"),
-        sa.UniqueConstraint("loot_plan_id", "name"),
-        sa.UniqueConstraint("loot_plan_id", "run_number"),
+        sa.UniqueConstraint("loot_plan_id", "name", name="uq_loot_plan_runs_plan_name_initial"),
+        sa.UniqueConstraint(
+            "loot_plan_id", "run_number", name="uq_loot_plan_runs_plan_run_number_initial"
+        ),
     )
     op.create_table(
         "loot_plan_participants",
@@ -143,7 +149,7 @@ def upgrade() -> None:
         ["character_id"],
     )
     op.create_index(
-        "ix_confirmed_reclear_material_grants_augmentation_material_type_id",
+        "ix_confirmed_grants_material_type_id",
         "confirmed_reclear_material_grants",
         ["augmentation_material_type_id"],
     )
@@ -160,7 +166,7 @@ def downgrade() -> None:
         table_name="confirmed_reclear_material_grants",
     )
     op.drop_index(
-        "ix_confirmed_reclear_material_grants_augmentation_material_type_id",
+        "ix_confirmed_grants_material_type_id",
         table_name="confirmed_reclear_material_grants",
     )
     op.drop_index(

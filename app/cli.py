@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from app.config import Settings, get_settings
 from app.database import create_database_engine, create_session_factory
 from app.models import GearSlot, Job, Static
+from app.services.hierarchy import bootstrap_default_hierarchies
 from bot.services.migrations import verify_migration_head
 
 ROOT = Path(__file__).parents[1]
@@ -33,6 +34,13 @@ def _alembic_config(settings: Settings) -> Config:
 def db_upgrade() -> None:
     settings = get_settings().validate(require_token=False)
     command.upgrade(_alembic_config(settings), "head")
+    engine = create_database_engine(settings.database_url)
+    try:
+        with create_session_factory(engine)() as session:
+            bootstrap_default_hierarchies(session)
+            session.commit()
+    finally:
+        engine.dispose()
     print("Database upgraded to the current migration head.")
 
 
@@ -105,9 +113,7 @@ def validate_installation(settings: Settings | None = None) -> list[str]:
             messages.append(f"Seed records: valid ({jobs} jobs, {slots} slots)")
             statics = list(session.scalars(select(Static).where(Static.active.is_(True))))
             ready = sum(
-                static.active_raid_tier_id is not None
-                and any(hierarchy.active for hierarchy in static.job_hierarchies)
-                for static in statics
+                any(hierarchy.active for hierarchy in static.job_hierarchies) for static in statics
             )
             messages.append(f"Static readiness: {ready}/{len(statics)} active statics ready")
     finally:

@@ -22,8 +22,12 @@ gear_classification = sa.Enum(
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        with op.get_context().autocommit_block():
+            op.execute("ALTER TYPE gearclassification ADD VALUE IF NOT EXISTS 'CRAFTED_EX'")
     with op.batch_alter_table("loot_plan_runs") as batch:
-        batch.drop_constraint("uq_loot_plan_runs_loot_plan_id", type_="unique")
+        batch.drop_constraint("uq_loot_plan_runs_plan_name_initial", type_="unique")
+        batch.drop_constraint("uq_loot_plan_runs_plan_run_number_initial", type_="unique")
         batch.create_unique_constraint(
             "uq_loot_plan_runs_plan_run_number", ["loot_plan_id", "run_number"]
         )
@@ -36,7 +40,7 @@ def upgrade() -> None:
     # ``items`` remains a named loot/material resource table. Its two legacy
     # metadata columns are intentionally deprecated in place because rebuilding
     # this heavily referenced table is unsafe on populated SQLite databases.
-    op.execute("UPDATE jobs SET uses_offhand = 1 WHERE abbreviation = 'PLD'")
+    op.execute("UPDATE jobs SET uses_offhand = TRUE WHERE abbreviation = 'PLD'")
 
     for table, column in (
         ("character_gear_slots", "current_classification"),
@@ -91,22 +95,43 @@ def upgrade() -> None:
         batch.drop_column("item_id")
 
     op.rename_table("inventory_items", "legacy_inventory_items")
+    if op.get_bind().dialect.name == "postgresql":
+        for old, new in (
+            ("pk_inventory_items", "pk_legacy_inventory_items"),
+            ("ck_inventory_items_nonnegative_quantity", "ck_legacy_inventory_items_quantity"),
+            ("fk_inventory_items_character_id_characters", "fk_legacy_inventory_character"),
+            ("fk_inventory_items_item_id_items", "fk_legacy_inventory_item"),
+            ("uq_inventory_items_character_id", "uq_legacy_inventory_character_item"),
+        ):
+            op.execute(f'ALTER TABLE legacy_inventory_items RENAME CONSTRAINT "{old}" TO "{new}"')
     op.create_table(
         "inventory_items",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("character_id", sa.Integer(), sa.ForeignKey("characters.id"), nullable=False),
-        sa.Column("loot_type_id", sa.Integer(), sa.ForeignKey("loot_types.id")),
-        sa.Column("gear_slot_id", sa.Integer(), sa.ForeignKey("gear_slots.id")),
+        sa.Column("character_id", sa.Integer(), nullable=False),
+        sa.Column("loot_type_id", sa.Integer()),
+        sa.Column("gear_slot_id", sa.Integer()),
         sa.Column("classification", gear_classification),
         sa.Column("quantity", sa.Integer(), nullable=False, server_default="0"),
-        sa.CheckConstraint("quantity >= 0", name="nonnegative_quantity"),
+        sa.CheckConstraint("quantity >= 0", name="ck_inventory_items_category_quantity"),
         sa.CheckConstraint(
             "(loot_type_id IS NOT NULL AND gear_slot_id IS NULL AND classification IS NULL) OR "
             "(loot_type_id IS NULL AND gear_slot_id IS NOT NULL AND classification IS NOT NULL)",
-            name="inventory_resource_or_category",
+            name="ck_inventory_items_category_shape",
         ),
-        sa.UniqueConstraint("character_id", "loot_type_id"),
-        sa.UniqueConstraint("character_id", "gear_slot_id", "classification"),
+        sa.ForeignKeyConstraint(
+            ["character_id"], ["characters.id"], name="fk_inventory_category_character"
+        ),
+        sa.ForeignKeyConstraint(
+            ["loot_type_id"], ["loot_types.id"], name="fk_inventory_category_loot_type"
+        ),
+        sa.ForeignKeyConstraint(
+            ["gear_slot_id"], ["gear_slots.id"], name="fk_inventory_category_gear_slot"
+        ),
+        sa.PrimaryKeyConstraint("id", name="pk_inventory_items_category"),
+        sa.UniqueConstraint("character_id", "loot_type_id", name="uq_inventory_category_resource"),
+        sa.UniqueConstraint(
+            "character_id", "gear_slot_id", "classification", name="uq_inventory_category_gear"
+        ),
     )
     op.execute(
         """
@@ -144,7 +169,12 @@ def downgrade() -> None:
     with op.batch_alter_table("loot_plan_runs") as batch:
         batch.drop_constraint("uq_loot_plan_runs_plan_name", type_="unique")
         batch.drop_constraint("uq_loot_plan_runs_plan_run_number", type_="unique")
-        batch.create_unique_constraint("uq_loot_plan_runs_loot_plan_id", ["loot_plan_id", "name"])
+        batch.create_unique_constraint(
+            "uq_loot_plan_runs_plan_name_initial", ["loot_plan_id", "name"]
+        )
+        batch.create_unique_constraint(
+            "uq_loot_plan_runs_plan_run_number_initial", ["loot_plan_id", "run_number"]
+        )
     with op.batch_alter_table("bis_set_items") as batch:
         batch.add_column(sa.Column("desired_item_id", sa.Integer()))
         batch.add_column(sa.Column("base_tome_item_id", sa.Integer()))

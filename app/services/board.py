@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     Character,
-    CharacterFloorBookBalance,
     CharacterGearSlot,
     CharacterKind,
+    GearClassification,
     GearSlot,
     GearSlotCode,
     ReclearWeek,
@@ -24,14 +24,51 @@ from app.schemas.board import (
     DisplayStatus,
     StaticGearBoard,
 )
-from app.schemas.needs import NeedStatus, SlotNeedResult
-from app.services.gearboard import classify_gear_state
+from app.schemas.needs_v2 import NeedsV2Status
 from app.services.item_level import calculate_roster_item_levels
-from app.services.needs import calculate_character_needs
+from app.services.needs_state import load_character_needs_state
+from app.services.needs_v2 import calculate_character_needs_v2
 
 
-def display_status(result: SlotNeedResult) -> DisplayStatus:
-    return classify_gear_state(result)
+def display_status(result) -> DisplayStatus:
+    status = result.status
+    current = getattr(result, "current", getattr(result, "current_classification", None))
+    slot_code = getattr(result, "gear_slot", getattr(result, "slot", None))
+    if (
+        getattr(slot_code, "code", slot_code) is GearSlotCode.OFFHAND
+        and getattr(result, "character", None) is not None
+        and getattr(result.character, "job", None) is not None
+        and not result.character.job.uses_offhand
+    ):
+        return DisplayStatus.NA
+    status_value = getattr(status, "value", status)
+    if status_value == "NOT_APPLICABLE" and current is GearClassification.GARBAGE:
+        return DisplayStatus.NEEDS_REPLACEMENT
+    if not isinstance(status, NeedsV2Status):
+        if status_value in {"COMPLETE", "MANUALLY_COMPLETE"}:
+            return DisplayStatus.BIS
+        if status_value == "INVALID_CONFIGURATION":
+            return DisplayStatus.NEEDS_REPLACEMENT
+        if current is GearClassification.CRAFTED_EX:
+            return DisplayStatus.CRAFTED_EX
+        if current is GearClassification.TOME:
+            return DisplayStatus.TOME_NEEDS_AUGMENT
+        if current in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}:
+            return DisplayStatus.ALTERNATE
+        return DisplayStatus.NEEDS_REPLACEMENT
+    if status in {NeedsV2Status.COMPLETE, NeedsV2Status.MANUALLY_COMPLETE}:
+        return DisplayStatus.BIS
+    if getattr(status, "value", status) == "NOT_APPLICABLE":
+        return DisplayStatus.NA
+    if getattr(status, "value", status) == "INVALID_CONFIGURATION":
+        return DisplayStatus.NEEDS_REPLACEMENT
+    if current is GearClassification.CRAFTED_EX:
+        return DisplayStatus.CRAFTED_EX
+    if current is GearClassification.TOME:
+        return DisplayStatus.TOME_NEEDS_AUGMENT
+    if current in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}:
+        return DisplayStatus.ALTERNATE
+    return DisplayStatus.NEEDS_REPLACEMENT
 
 
 def build_static_gear_board(session: Session, static_id: int) -> StaticGearBoard:
@@ -40,13 +77,10 @@ def build_static_gear_board(session: Session, static_id: int) -> StaticGearBoard
         .where(Static.id == static_id)
         .options(
             selectinload(Static.members).selectinload(StaticMember.characters),
-            selectinload(Static.active_raid_tier),
         )
     )
     if static is None or not static.active:
         raise LookupError("The selected static is stale or has been deleted.")
-    if static.active_raid_tier is None:
-        raise ValueError("The selected static has no active raid tier.")
     mains = sorted(
         (
             character
@@ -67,7 +101,6 @@ def build_static_gear_board(session: Session, static_id: int) -> StaticGearBoard
         _build_player(
             session,
             character,
-            static.active_raid_tier_id,
             item_levels[character.id],
         )
         for character in mains[:8]
@@ -76,8 +109,6 @@ def build_static_gear_board(session: Session, static_id: int) -> StaticGearBoard
         static.id,
         static.name,
         static.guild.discord_guild_id,
-        static.active_raid_tier.id,
-        static.active_raid_tier.name,
         tuple(member.discord_user_id for member in static.members if member.active),
         players,
         datetime.now(UTC),
@@ -87,15 +118,15 @@ def build_static_gear_board(session: Session, static_id: int) -> StaticGearBoard
 
 
 def _current_week_number(session: Session, static_id: int) -> int | None:
-    """Return the working-static week number; the first reclear is Week 2."""
     count = session.scalar(
         select(func.count()).select_from(ReclearWeek).where(ReclearWeek.static_id == static_id)
     )
     return 2 + (count or 0)
 
 
-def _build_player(session: Session, character: Character, tier_id: int, item_level) -> BoardPlayer:
-    needs = calculate_character_needs(session, character.id, tier_id)
+def _build_player(session: Session, character: Character, item_level) -> BoardPlayer:
+    state = load_character_needs_state(session, character.id)
+    needs = calculate_character_needs_v2(session, character.id)
     gear = {
         row.gear_slot_id: row
         for row in session.scalars(
@@ -104,18 +135,18 @@ def _build_player(session: Session, character: Character, tier_id: int, item_lev
     }
     slots = tuple(
         BoardSlot(
-            result.slot.code,
-            result.slot.display_name,
-            result.slot.sort_order,
-            result.desired_classification,
-            result.current_classification,
+            result.gear_slot,
+            result.slot_name,
+            result.sort_order,
+            result.desired,
+            result.current,
             result.status,
             display_status(result),
-            result.required_raid_floor.floor_number if result.required_raid_floor else None,
-            result.required_loot_type.name if result.required_loot_type else None,
-            gear[result.slot.id].updated_at if result.slot.id in gear else None,
+            result.required_floor_number,
+            result.required_loot_type_code,
+            gear[result.gear_slot_id].updated_at if result.gear_slot_id in gear else None,
             result.explanation,
-            result.required_loot_type.code if result.required_loot_type else None,
+            result.required_loot_type_code,
         )
         for result in needs.slot_results
     )
@@ -128,7 +159,7 @@ def _build_player(session: Session, character: Character, tier_id: int, item_lev
                 slot.sort_order,
                 None,
                 gear[slot.id].current_classification if slot.id in gear else None,
-                NeedStatus.INVALID_CONFIGURATION,
+                NeedsV2Status.INVALID_CONFIGURATION,
                 (
                     DisplayStatus.NA
                     if slot.code is GearSlotCode.OFFHAND
@@ -139,56 +170,46 @@ def _build_player(session: Session, character: Character, tier_id: int, item_lev
                 None,
                 None,
                 gear[slot.id].updated_at if slot.id in gear else None,
-                "No selected BiS set is configured.",
+                "No Static + Job BiS set is configured.",
                 None,
             )
             for slot in all_slots
         )
-    balances = {
-        row.raid_floor_id: row
-        for row in session.scalars(
-            select(CharacterFloorBookBalance).where(
-                CharacterFloorBookBalance.character_id == character.id
-            )
-        )
-    }
-    requirements = {row.raid_floor.id: row for row in needs.book_requirements}
+    books_owned = dict(state.books)
     books = tuple(
         BoardBook(
             floor.floor_number,
-            balances[floor.id].earned if floor.id in balances else 0,
-            balances[floor.id].spent if floor.id in balances else 0,
-            balances[floor.id].manual_adjustment if floor.id in balances else 0,
-            balances[floor.id].available if floor.id in balances else 0,
-            requirements[floor.id].additional_books_needed if floor.id in requirements else 0,
+            0,
+            0,
+            0,
+            books_owned.get(floor.floor_number, 0),
         )
-        for floor in sorted(needs.raid_tier.floors, key=lambda value: value.floor_number)
+        for floor in sorted(state.floors, key=lambda value: value.floor_number)
     )
-    owned = {row.material.id: row.units_owned for row in needs.materials_owned}
-    required = {row.material.id: row.additional_units_needed for row in needs.augmentation_needs}
+    owned = dict(state.material_quantities)
+    required = {row.material_type_id: row.additional_needed for row in needs.material_needs}
     materials = tuple(
         BoardMaterial(
-            material.code, material.name, owned.get(material.id, 0), required.get(material.id, 0)
+            material.code,
+            material.name,
+            owned.get(material.material_type_id, 0),
+            required.get(material.material_type_id, 0),
         )
-        for material in sorted(
-            needs.raid_tier.augmentation_material_types, key=lambda value: value.code
-        )
+        for material in sorted(state.materials, key=lambda value: value.code)
     )
-    selection = needs.selected_bis_set
     return BoardPlayer(
         character.id,
         character.static_member.display_name,
         character.name,
         character.world,
         character.kind,
-        selection.job.abbreviation if selection else None,
-        selection.name if selection else None,
-        selection.gear_set_url if selection else None,
+        state.job_abbreviation,
+        state.bis_set_name,
         slots,
         books,
         materials,
         needs.complete_slot_count,
-        needs.total_applicable_slot_count,
+        needs.applicable_slot_count,
         item_level.average_item_level,
         item_level.warnings,
         tuple(needs.configuration_warnings),

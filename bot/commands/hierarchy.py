@@ -23,6 +23,7 @@ class Hierarchy(commands.Cog):
         await reply(interaction, f"Hierarchy version {row.version} activated.", ephemeral=True)
 
     @group.command(name="show")
+    @require_raid_leader(None)
     async def show(self, interaction):
         await defer(interaction)
         with command_session(self.bot) as session:
@@ -33,7 +34,7 @@ class Hierarchy(commands.Cog):
                 "No hierarchy configured."
                 if row is None
                 else "\n".join(
-                    f"{e.position}. {e.job.abbreviation} — {e.job.name}" for e in row.entries
+                    f"{e.position}. {e.job.abbreviation} â€” {e.job.name}" for e in row.entries
                 )
             )
         await reply(interaction, text)
@@ -48,7 +49,7 @@ class Hierarchy(commands.Cog):
                 .order_by(JobHierarchy.version.desc())
             ).all()
             lines = [
-                f"Version {h.version} — {h.created_at:%Y-%m-%d %H:%M:%S} — "
+                f"Version {h.version} â€” {h.created_at:%Y-%m-%d %H:%M:%S} â€” "
                 f"{'active' if h.active else 'previous'}"
                 for h in rows
             ]

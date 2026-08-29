@@ -1,6 +1,6 @@
 """Discord-safe fixed-width weekly loot-board formatting."""
 
-from app.schemas.reclear import LootBoard, LootBoardRow
+from app.schemas.board import StaticGearBoard as LootBoard
 from app.services.formatting import _bounded_codeblock, _row, safe_text
 
 LOOT_ROWS_PER_PAGE = 12
@@ -40,7 +40,7 @@ def loot_board_table(
     return _bounded_codeblock(lines), page_count
 
 
-def assignment_detail(row: LootBoardRow) -> str:
+def assignment_detail(row) -> str:
     history = (
         "\n".join(
             f"- {kind.value}: {'Yes' if result else 'No'}{f' — {safe_text(note)}' if note else ''}"
@@ -51,12 +51,12 @@ def assignment_detail(row: LootBoardRow) -> str:
     errors = "\n".join(f"- {safe_text(value)}" for value in row.distribution_errors) or "- None"
     base = "N/A" if row.base_tome_owned is None else ("Yes" if row.base_tome_owned else "No")
     text = (
-        f"**{safe_text(row.floor_name)} — Split {chr(64 + row.group_number)}**\n"
+        f"**{safe_text(row.floor_name)} â€” Split {chr(64 + row.group_number)}**\n"
         f"Drop: {safe_text(row.drop_name)} #{row.instance}\n"
         f"Intended: {safe_text(row.intended_slot)} / {safe_text(row.intended_item)}\n"
         f"Suggested: {safe_text(row.suggested_recipient)}\n"
         f"Final: {safe_text(row.final_recipient or row.recipient)}\n"
-        f"Backup: {safe_text(row.backup)}\nHierarchy: {row.hierarchy_position or '—'}\n"
+        f"Backup: {safe_text(row.backup)}\nHierarchy: {row.hierarchy_position or 'â€”'}\n"
         f"Reason: {safe_text(row.reason)}\nBase tome owned: {base}\nState: {row.status.value}\n"
         f"**Confirmation history**\n{history}\n**Distribution errors**\n{errors}"
     )

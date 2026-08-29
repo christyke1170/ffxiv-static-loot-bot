@@ -26,6 +26,11 @@ ALL = (
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        # PostgreSQL cannot use an enum label in the same transaction in
+        # which it was added by the preceding historical revision.
+        with op.get_context().autocommit_block():
+            op.execute("ALTER TYPE gearclassification ADD VALUE IF NOT EXISTS 'GARBAGE'")
     bind = op.get_bind()
     bind.execute(
         sa.text(

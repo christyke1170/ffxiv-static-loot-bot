@@ -1,16 +1,9 @@
 """Database arrangement helpers; command behavior is never implemented here."""
 
-import json
-from pathlib import Path
-
 from sqlalchemy import select
 
 from app.models import DiscordGuild, Static, UserStaticPreference
-from app.services import import_bis_sets, import_raid_tier, seed_reference_data
-
-ROOT = Path(__file__).parents[2]
-TIER_DATA = json.loads((ROOT / "sample_data" / "fictional_raid_tier.json").read_text("utf-8"))
-BIS_DATA = json.loads((ROOT / "sample_data" / "fictional_bis_sets.json").read_text("utf-8"))
+from app.services import seed_reference_data
 
 
 def arrange_static(
@@ -41,9 +34,11 @@ def arrange_static(
 
 
 def arrange_imports(bot, *, bis: bool = False) -> None:
+    """Seed neutral reference data for command tests.
+
+    The old tier/BiS JSON import arrangement was retired with the configurable
+    tier graph; Static + Job BiS tests arrange rows directly.
+    """
     with bot.session_factory() as session:
         seed_reference_data(session)
-        import_raid_tier(session, TIER_DATA)
-        if bis:
-            import_bis_sets(session, BIS_DATA)
         session.commit()

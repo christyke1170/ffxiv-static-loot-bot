@@ -4,13 +4,13 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from app.models import CharacterGearSlot, StaticMember
-from app.services.board import build_static_gear_board
-from app.services.formatting import player_table
 from app.services.gear import (
     clear_gear,
     import_current_state,
     set_manual_completion,
 )
+from app.services.needs_formatting import format_needs_player
+from app.services.needs_v2 import calculate_character_needs_v2
 from bot.checks import is_raid_leader, require_raid_leader
 from bot.services.commands import command_session, defer, read_json_attachment, reply, selected
 from bot.services.gear import character, member_character, slot
@@ -126,11 +126,8 @@ class Gear(commands.Cog):
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             target = character(session, static, character_name)
-            board = build_static_gear_board(session, static.id)
-            player = next(value for value in board.players if value.character_id == target.id)
-            table, warnings = player_table(player)
-        text = table + ("\nWarnings: " + "; ".join(warnings) if warnings else "")
-        await reply(interaction, text)
+            result = calculate_character_needs_v2(session, target.id)
+        await reply(interaction, format_needs_player(result))
 
     @group.command(name="import")
     @require_raid_leader(None)

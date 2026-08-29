@@ -29,7 +29,6 @@ class StaticLootClient(commands.Bot):
             "bot.commands.static",
             "bot.commands.member",
             "bot.commands.character",
-            "bot.commands.tier",
             "bot.commands.bis",
             "bot.commands.hierarchy",
             "bot.commands.gear",
@@ -49,9 +48,6 @@ class StaticLootClient(commands.Bot):
             for extension in reversed(loaded):
                 await self.unload_extension(extension)
             raise
-        from bot.views.confirmation import register_persistent_confirmation_views
-
-        register_persistent_confirmation_views(self)
         asyncio.get_running_loop().set_exception_handler(self._task_exception_handler)
         self.tree.on_error = handle_app_command_error
         if self.settings.dev_guild_id:

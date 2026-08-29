@@ -8,9 +8,9 @@
       "gear_set_url": "https://example.invalid/fictional-set",
       "description": "Fictional data for import development; not FFXIV guidance.",
       "items": [
-        {"slot": "HEAD", "desired_item": "Fictional Savage Helm", "classification": "SAVAGE", "floor": 1, "loot_type": "HEAD_COFFER", "book_cost": 4},
-        {"slot": "BODY", "desired_item": "Fictional Augmented Cuirass", "classification": "AUGMENTED_TOME", "base_tome_item": "Fictional Tome Cuirass", "tome_cost": 825, "augmentation_material": "POLISH"},
-        {"slot": "OFFHAND", "desired_item": "Fictional Crafted Shield", "classification": "CRAFTED", "notes": "Paladin is the only FFXIV combat job with a separate offhand."}
+        {"slot": "HEAD", "classification": "SAVAGE", "floor": 1, "loot_type": "HEAD_COFFER", "book_cost": 4},
+        {"slot": "BODY", "classification": "AUGMENTED_TOME", "tome_cost": 825, "augmentation_material": "POLISH"},
+        {"slot": "OFFHAND", "classification": "CRAFTED_EX", "notes": "Offhand applicability comes from job configuration."}
       ]
     }
   ]

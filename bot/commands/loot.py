@@ -1,117 +1,62 @@
-"""Raid-leader weekly loot assignment administration commands."""
+"""Discord commands for neutral V2 confirmation corrections."""
 
 from typing import Literal
 
 from discord import app_commands
 from discord.ext import commands
+from sqlalchemy import select
 
-from app.models import ConfirmationQuestion, LootAssignmentState
-from app.schemas.confirmations import ConfirmationError
-from app.services import (
-    correct_confirmation,
-    mark_assignment_disposition,
-    override_assignment,
-)
+from app.models import V2Confirmation, V2PlanAssignment
+from app.services import correct_v2_application, correct_v2_receipt
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
-from bot.services.gear import character
 
 
 class Loot(commands.Cog):
-    group = app_commands.Group(name="loot", description="Manage current weekly loot assignments")
+    group = app_commands.Group(name="loot", description="Manage current weekly V2 loot")
 
     def __init__(self, bot):
         self.bot = bot
 
-    @group.command(name="override", description="Override an assignment's final recipient")
-    @require_raid_leader(None)
-    async def override(
-        self,
-        interaction,
-        assignment: int,
-        new_recipient: str,
-        reason: str,
-        force: bool = False,
-    ):
-        await defer(interaction, ephemeral=True)
-        with command_session(self.bot) as session:
-            static = selected(session, interaction)
-            recipient = character(session, static, new_recipient)
-            row = override_assignment(
-                session,
-                static.id,
-                assignment,
-                recipient.id,
-                reason,
-                interaction.user.id,
-                force=force,
-            )
-        await reply(
-            interaction,
-            f"Assignment {row.id} final recipient set to {recipient.name}; "
-            "original suggestion retained.",
-            ephemeral=True,
-        )
-
-    @group.command(name="leftover", description="Mark an assignment leftover or free roll")
-    @require_raid_leader(None)
-    async def leftover(
-        self,
-        interaction,
-        assignment: int,
-        disposition: Literal["Leftover", "Free roll"],
-        reason: str,
-    ):
-        await defer(interaction, ephemeral=True)
-        state = (
-            LootAssignmentState.LEFTOVER
-            if disposition == "Leftover"
-            else LootAssignmentState.FREE_ROLL
-        )
-        with command_session(self.bot) as session:
-            static = selected(session, interaction)
-            row = mark_assignment_disposition(
-                session, static.id, assignment, state, reason, interaction.user.id
-            )
-        await reply(interaction, f"Assignment {row.id} marked {state.value}.", ephemeral=True)
-
-    @group.command(name="correction", description="Safely correct an append-only confirmation")
+    @group.command(name="correction", description="Correct an append-only V2 confirmation")
     @require_raid_leader(None)
     async def correction(
         self,
         interaction,
         assignment: int,
-        confirmation: Literal["Received", "Redeemed correctly", "Augment applied"],
+        confirmation: Literal["Receipt", "Application"],
         correct_answer: bool,
         reason: str,
     ):
         await defer(interaction, ephemeral=True)
-        question = {
-            "Received": ConfirmationQuestion.RECEIVED,
-            "Redeemed correctly": ConfirmationQuestion.REDEEMED_CORRECTLY,
-            "Augment applied": ConfirmationQuestion.AUGMENT_APPLIED,
-        }[confirmation]
-        try:
-            with command_session(self.bot) as session:
-                static = selected(session, interaction)
-                from app.services import resolve_assignment
-
-                resolve_assignment(session, static.id, assignment)
-                correct_confirmation(
-                    session,
-                    assignment,
-                    question,
-                    correct_answer,
-                    interaction.user.id,
-                    reason,
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            assignment_row = session.scalar(
+                select(V2PlanAssignment).where(V2PlanAssignment.id == assignment)
+            )
+            if assignment_row is None or assignment_row.plan.static_id != static.id:
+                raise ValueError("That V2 assignment does not belong to the selected static.")
+            if confirmation == "Receipt":
+                resource_key, action = (
+                    assignment_row.material_key or assignment_row.loot_key,
+                    "RECEIPT",
                 )
-        except ConfirmationError as error:
-            message = str(error)
-            if "manual intervention required" in message.lower():
-                message = "Automatic correction is unsafe. " + message
-            await reply(interaction, message, ephemeral=True)
-            return
-        await reply(interaction, "Confirmation corrected; history was retained.", ephemeral=True)
+            else:
+                resource_key, action = "APPLICATION", "APPLICATION"
+            row = session.scalar(
+                select(V2Confirmation).where(
+                    V2Confirmation.assignment_id == assignment,
+                    V2Confirmation.resource_key == resource_key,
+                    V2Confirmation.action == action,
+                )
+            )
+            if row is None:
+                raise ValueError("No matching V2 confirmation exists for this assignment.")
+            if action == "RECEIPT":
+                correct_v2_receipt(session, row.id, correct_answer, interaction.user.id, reason)
+            else:
+                correct_v2_application(session, row.id, correct_answer, interaction.user.id, reason)
+        await reply(interaction, "V2 correction recorded; history was retained.", ephemeral=True)
 
 
 async def setup(bot):

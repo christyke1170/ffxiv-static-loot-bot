@@ -1,17 +1,15 @@
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
 
-from app.models import (
-    CharacterAugmentationInventory,
-    CharacterFloorBookBalance,
-    GearClassification,
-    InventoryItem,
+from app.models import GearClassification
+from app.services.neutral_resources import (
+    current_balance,
+    set_current_balance,
+    validate_resource_key,
 )
-from app.services.gear import set_augmentation_material, set_books, set_inventory
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
-from bot.services.gear import character, floor, material
+from bot.services.gear import character
 
 
 class Inventory(commands.Cog):
@@ -41,23 +39,10 @@ class Inventory(commands.Cog):
                 classification = GearClassification[category.upper()]
             except KeyError as exc:
                 raise ValueError("Unknown gear category.") from exc
-            existing = session.scalar(
-                select(InventoryItem).where(
-                    InventoryItem.character_id == target.id,
-                    InventoryItem.gear_slot_id == target_slot.id,
-                    InventoryItem.classification == classification,
-                )
-            )
+            key = f"{classification.value}_{target_slot.code.value}"
+            existing = current_balance(session, static.id, target.id, key)
             before = existing.quantity if existing else None
-            set_inventory(
-                session,
-                static,
-                target,
-                target_slot,
-                classification,
-                quantity,
-                interaction.user.id,
-            )
+            set_current_balance(session, static, target, key, quantity)
             action = (
                 "cleared"
                 if quantity == 0 and before is not None
@@ -83,30 +68,18 @@ class Augment(commands.Cog):
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             target = character(session, static, character_name)
-            target_material = material(session, static, material_code)
-            existing = session.scalar(
-                select(CharacterAugmentationInventory).where(
-                    CharacterAugmentationInventory.character_id == target.id,
-                    CharacterAugmentationInventory.augmentation_material_type_id
-                    == target_material.id,
-                )
-            )
+            key = material_code.strip().upper()
+            key = {"GLAZE": "ACCESSORY_GLAZE", "TWINE": "ARMOR_TWINE"}.get(key, key)
+            validate_resource_key(key)
+            existing = current_balance(session, static.id, target.id, key)
             before = existing.quantity if existing else None
-            row = set_augmentation_material(
-                session,
-                static,
-                target,
-                target_material,
-                quantity,
-                interaction.user.id,
-            )
+            set_current_balance(session, static, target, key, quantity)
             action = (
                 "created" if before is None else "unchanged" if before == quantity else "updated"
             )
         await reply(
             interaction,
-            f"Augmentation material {action}: {row.augmentation_material_type.name} "
-            f"quantity is {quantity}.",
+            f"Augmentation material {action}: {key} quantity is {quantity}.",
             ephemeral=True,
         )
 
@@ -132,34 +105,12 @@ class Books(commands.Cog):
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             target = character(session, static, character_name)
-            target_floor = floor(session, static, floor_number)
-            existing = session.scalar(
-                select(CharacterFloorBookBalance).where(
-                    CharacterFloorBookBalance.character_id == target.id,
-                    CharacterFloorBookBalance.raid_floor_id == target_floor.id,
-                )
-            )
-            before = (
-                (
-                    existing.earned,
-                    existing.spent,
-                    existing.manual_adjustment,
-                )
-                if existing
-                else None
-            )
-            row = set_books(
-                session,
-                static,
-                target,
-                target_floor,
-                earned,
-                spent,
-                manual_adjustment,
-                interaction.user.id,
-            )
-            available = row.available
-            after = (earned, spent, manual_adjustment)
+            available = earned - spent + manual_adjustment
+            key = f"BOOK_FLOOR_{floor_number}"
+            existing = current_balance(session, static.id, target.id, key)
+            before = existing.quantity if existing else None
+            set_current_balance(session, static, target, key, available)
+            after = available
             action = "created" if before is None else "unchanged" if before == after else "updated"
         await reply(
             interaction,

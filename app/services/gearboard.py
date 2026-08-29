@@ -2,10 +2,10 @@
 
 from app.models import GearClassification, GearSlotCode
 from app.schemas.board import DisplayStatus
-from app.schemas.needs import NeedStatus, SlotNeedResult
+from app.schemas.needs_v2 import NeedsV2SlotResult, NeedsV2Status
 
 
-def classify_gear_state(result: SlotNeedResult) -> DisplayStatus:
+def classify_gear_state(result: NeedsV2SlotResult) -> DisplayStatus:
     """Classify one displayed slot using its current gear state.
 
     The needs engine remains authoritative for category equality and manual completion.
@@ -17,9 +17,9 @@ def classify_gear_state(result: SlotNeedResult) -> DisplayStatus:
     # Completion is deliberately checked before looking at the current source.
     # A completed exact item must not be relabeled just because it was entered as
     # Crafted, EX, Tome, or another current-gear source.
-    if result.status in {NeedStatus.COMPLETE, NeedStatus.MANUALLY_COMPLETE}:
+    if result.status in {NeedsV2Status.COMPLETE, NeedsV2Status.MANUALLY_COMPLETE}:
         return DisplayStatus.BIS
-    if result.status is NeedStatus.INVALID_CONFIGURATION:
+    if result.status is NeedsV2Status.INVALID_CONFIGURATION:
         return DisplayStatus.NEEDS_REPLACEMENT
 
     desired = result.desired_classification
