@@ -196,3 +196,32 @@ async def test_static_show_callback_formats_selected_static(bot, interaction_fac
     content = interaction.messages[0]["content"]
     assert "**Alpha**" in content
     assert "Members: 0" in content
+
+
+async def test_static_delete_requires_confirmation_and_deletes_after_confirm(
+    bot, interaction_factory
+):
+    static_id = arrange_static(bot)
+    interaction = interaction_factory(administrator=True)
+
+    await invoke_registered(StaticCog(bot), "delete", interaction, static_id)
+
+    prompt = interaction.followup.messages[0]
+    assert "Permanently delete" in prompt["content"]
+    with bot.session_factory() as session:
+        assert session.get(Static, static_id) is not None
+    confirmed = interaction_factory(administrator=True)
+    await prompt["view"].confirm(confirmed)
+    with bot.session_factory() as session:
+        assert session.get(Static, static_id) is None
+
+
+async def test_static_delete_cancel_preserves_static(bot, interaction_factory):
+    static_id = arrange_static(bot)
+    interaction = interaction_factory(administrator=True)
+    await invoke_registered(StaticCog(bot), "delete", interaction, static_id)
+
+    await interaction.followup.messages[0]["view"].cancel(interaction_factory(administrator=True))
+
+    with bot.session_factory() as session:
+        assert session.get(Static, static_id) is not None

@@ -32,7 +32,7 @@ class Needs(commands.Cog):
     @staticmethod
     def _player_line(result):
         return (
-            f"{safe_text(result.character_name)} ({safe_text(result.job_abbreviation or '?')}) â€” "
+            f"{safe_text(result.character_name)} ({safe_text(result.job_abbreviation or '?')}) - "
             f"{result.complete_slot_count}/{result.applicable_slot_count} applicable slots"
         )
 
@@ -75,7 +75,7 @@ class Needs(commands.Cog):
                         NeedsV2Status.NOT_APPLICABLE,
                     }:
                         lines.append(
-                            f"{safe_text(result.character_name)} — {safe_text(slot.slot_name)} — "
+                            f"{safe_text(result.character_name)} - {safe_text(slot.slot_name)} - "
                             f"{safe_text(slot.required_loot_type_code or 'configured need')}"
                         )
             warnings = self._warning_text(results)
@@ -95,7 +95,7 @@ class Needs(commands.Cog):
                 calculate_character_needs_v2(session, row.id) for row in self._characters(static)
             )
             lines = [
-                f"{self._player_line(result)} â€” "
+                f"{self._player_line(result)} - "
                 + (
                     ", ".join(
                         f"{safe_text(row.material_name)}: owned {row.owned}, "
@@ -118,7 +118,7 @@ class Needs(commands.Cog):
                 calculate_character_needs_v2(session, row.id) for row in self._characters(static)
             )
             lines = [
-                f"{self._player_line(result)} â€” "
+                f"{self._player_line(result)} - "
                 + ", ".join(
                     f"Floor {row.floor_number}: {row.available}" for row in result.book_balances
                 )

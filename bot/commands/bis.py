@@ -24,7 +24,7 @@ class Bis(commands.Cog):
             view = BisEditorView(
                 self.bot, static.id, job_row.id, interaction.user.id, interaction.guild.id
             )
-        await interaction.followup.send(view.content, view=view, ephemeral=True)
+        await interaction.followup.send(view=view, ephemeral=True)
 
     @group.command(name="show", description="Show category-only BiS for a job")
     @require_raid_leader(None)
@@ -72,7 +72,7 @@ class Bis(commands.Cog):
             view = BisClearView(
                 self.bot, static.id, job_row.id, interaction.user.id, interaction.guild.id
             )
-        await interaction.followup.send(view.content, view=view, ephemeral=True)
+        await interaction.followup.send(view=view, ephemeral=True)
 
 
 async def setup(bot):

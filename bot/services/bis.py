@@ -46,6 +46,8 @@ def resolve_job(session: Session, value: str) -> Job:
         )
     )
     if job is None:
+        if session.scalar(select(func.count()).select_from(Job)) == 0:
+            raise ValueError("Reference data is missing; an administrator must run `/setup seed`.")
         raise ValueError(f"Unknown job: {value}.")
     return job
 

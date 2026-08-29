@@ -49,7 +49,7 @@ class Gear(commands.Cog):
             interaction.user.id,
             interaction.guild.id,
         )
-        await interaction.response.send_message(content=view.content, view=view, ephemeral=True)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
     @set.autocomplete("display_name")
     async def set_display_name_autocomplete(self, interaction, current: str):

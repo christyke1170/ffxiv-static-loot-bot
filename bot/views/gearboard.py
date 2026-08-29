@@ -67,10 +67,10 @@ class GearBoardView(discord.ui.LayoutView):
             else:
                 table, warnings = player_table(player)
                 table = f"{table}\n{player_books(player)}"
-                subtitle = f"{player.display_name} — {player.character_name} ({player.job or '?'})"
+                subtitle = f"{player.display_name} - {player.character_name} ({player.job or '?'})"
         else:
             table, warnings = overview_table(self.board, self.page)
-            subtitle = f"Overview â€” page {self.page + 1}/{self.page_count}"
+            subtitle = f"Overview - page {self.page + 1}/{self.page_count}"
         warning_text = "\n".join(f"- {warning}" for warning in warnings)
         footer = (
             f"**Completion:** {sum(player.complete_slots for player in self.board.players)}/"
@@ -152,7 +152,7 @@ class GearBoardView(discord.ui.LayoutView):
             self._build()
         except (LookupError, ValueError):
             self._disable_all()
-            self._build("âš ï¸ This static selection is stale or unavailable.")
+            self._build("Warning: This static selection is stale or unavailable.")
             self._disable_all()
             self.stop()
         await interaction.response.edit_message(view=self)

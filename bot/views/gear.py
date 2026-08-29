@@ -20,7 +20,7 @@ from bot.checks import is_raid_leader
 from bot.services.commands import command_session, selected
 
 GEAR_EDITOR_TIMEOUT = 600.0
-MAX_COMPONENTS = 25
+MAX_COMPONENTS = 40
 MAX_MODAL_INPUTS = 5
 MAX_BOOK_BALANCE = 1_000_000
 STATE_LABELS = {
@@ -29,6 +29,20 @@ STATE_LABELS = {
     GearClassification.TOME: "Tome",
     GearClassification.AUGMENTED_TOME: "Augmented Tome",
     GearClassification.GARBAGE: "Garbage",
+}
+SLOT_LABELS = {
+    GearSlotCode.WEAPON: "Weapon",
+    GearSlotCode.HEAD: "Hat",
+    GearSlotCode.BODY: "Chest",
+    GearSlotCode.HANDS: "Gloves",
+    GearSlotCode.LEGS: "Pants",
+    GearSlotCode.FEET: "Boots",
+    GearSlotCode.EARRINGS: "Earring",
+    GearSlotCode.NECKLACE: "Necklace",
+    GearSlotCode.BRACELETS: "Bracelet",
+    GearSlotCode.RING_1: "Ring 1",
+    GearSlotCode.RING_2: "Ring 2",
+    GearSlotCode.OFFHAND: "Offhand",
 }
 
 
@@ -78,10 +92,16 @@ class BookAdjustmentModal(discord.ui.Modal):
             )
             return
         self.editor._build()
-        await interaction.response.edit_message(content=self.editor.content, view=self.editor)
+        await interaction.response.edit_message(view=self.editor)
 
 
-class GearEditorView(discord.ui.View):
+class GearMessageView(discord.ui.LayoutView):
+    def __init__(self, text: str):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Container(discord.ui.TextDisplay(text)))
+
+
+class GearEditorView(discord.ui.LayoutView):
     def __init__(
         self, bot, static_id: int, member_id: int, character_id: int, owner_id: int, guild_id: int
     ):
@@ -93,6 +113,7 @@ class GearEditorView(discord.ui.View):
         self.owner_id = owner_id
         self.guild_id = guild_id
         self.selected_slot: GearSlotCode | None = None
+        self.categories: dict[GearSlotCode, GearClassification] = {}
         self.closed = False
         self.content = ""
         self._build()
@@ -189,71 +210,71 @@ class GearEditorView(discord.ui.View):
         self.clear_items()
         name, kind, job, uses_offhand, slots, current, books = self._load()
         offhand_not_applicable = not uses_offhand
-        options = []
+        slot_controls = []
         for slot in slots:
-            state = current.get(slot.id)
-            state_label = (
-                "N/A"
-                if slot.code is GearSlotCode.OFFHAND and offhand_not_applicable
-                else STATE_LABELS.get(state, "Missing")
+            value = self.categories.get(slot.code, current.get(slot.id))
+            if slot.code is GearSlotCode.OFFHAND and offhand_not_applicable:
+                value = GearClassification.NOT_APPLICABLE
+            self.categories[slot.code] = value
+            choices = [(None, "Missing"), *STATE_LABELS.items()]
+            if slot.code is GearSlotCode.OFFHAND and offhand_not_applicable:
+                choices = [(GearClassification.NOT_APPLICABLE, "N/A")]
+            elif slot.code is GearSlotCode.OFFHAND:
+                choices.append((GearClassification.NOT_APPLICABLE, "N/A"))
+            control = discord.ui.Select(
+                placeholder=f"{SLOT_LABELS[slot.code]}: {STATE_LABELS.get(value, 'Missing')}",
+                options=[
+                    discord.SelectOption(
+                        label=label,
+                        value=classification.value if classification else "MISSING",
+                        default=classification is value,
+                    )
+                    for classification, label in choices
+                ],
+                custom_id=f"gear-editor:slot:{slot.code.value}",
+                disabled=slot.code is GearSlotCode.OFFHAND and offhand_not_applicable,
             )
-            options.append(
-                discord.SelectOption(
-                    label=SLOT_LABEL[slot.code.value],
-                    value=slot.code.value,
-                    description=f"Current: {state_label}",
-                    default=slot.code is self.selected_slot,
-                )
-            )
-        slot_select = discord.ui.Select(
-            placeholder="Choose a gear slot", options=options, custom_id="gear-editor:slot"
+            control.callback = self._select_category(slot.code)
+            slot_controls.append(control)
+        save = discord.ui.Button(
+            label="Save", style=discord.ButtonStyle.success, custom_id="gear-editor:save"
         )
-        slot_select.callback = self.select_slot
-        self.add_item(slot_select)
-
-        selected_is_na = self.selected_slot is GearSlotCode.OFFHAND and offhand_not_applicable
-        state_select = discord.ui.Select(
-            placeholder="Choose current state",
-            options=[
-                discord.SelectOption(label=label, value=value.value)
-                for value, label in STATE_LABELS.items()
-            ],
-            custom_id="gear-editor:state",
-            disabled=self.selected_slot is None or selected_is_na,
-        )
-        state_select.callback = self.select_state
-        self.add_item(state_select)
-
-        reset = discord.ui.Button(
-            label="Clear / Reset slot",
-            custom_id="gear-editor:reset",
-            disabled=self.selected_slot is None or selected_is_na,
-        )
-        close = discord.ui.Button(
-            label="Close", style=discord.ButtonStyle.danger, custom_id="gear-editor:close"
+        cancel = discord.ui.Button(
+            label="Cancel", style=discord.ButtonStyle.secondary, custom_id="gear-editor:cancel"
         )
         adjust_books = discord.ui.Button(label="Adjust Books", custom_id="gear-editor:adjust-books")
-        reset.callback = self.reset_slot
         adjust_books.callback = self.adjust_books
-        close.callback = self.close
-        self.add_item(reset)
-        self.add_item(adjust_books)
-        self.add_item(close)
-        selected_label = SLOT_LABEL[self.selected_slot.value] if self.selected_slot else "None"
+        save.callback = self.save
+        cancel.callback = self.cancel
+        selected_label = "Edit all gear slots"
         self.content = (
-            f"**{discord.utils.escape_markdown(name)} Â· {kind} Â· {job}**\n"
-            f"Selected slot: **{selected_label}**\n\n"
+            f"**{discord.utils.escape_markdown(name)} - {kind} - {job}**\n"
+            f"{selected_label}\n\n"
             "**Books**\n"
             + (
                 "\n".join(f"Floor {number}: {available}" for _, number, available in books)
                 or "None"
             )
         )
-        if selected_is_na:
-            self.content += " â€” **N/A for this job**"
         if notice:
             self.content += f"\n{notice}"
-        assert len(list(self.walk_children())) <= MAX_COMPONENTS
+        controls = []
+        for index, (slot, control) in enumerate(zip(slots[:-1], slot_controls[:-1], strict=True)):
+            label = SLOT_LABELS[slot.code]
+            if index == 0:
+                label = f"{self.content}\n\n{label}"
+            controls.extend((discord.ui.TextDisplay(label), discord.ui.ActionRow(control)))
+        last_slot = slots[-1]
+        controls.extend(
+            (
+                discord.ui.TextDisplay(SLOT_LABELS[last_slot.code]),
+                discord.ui.ActionRow(slot_controls[-1]),
+                discord.ui.ActionRow(adjust_books, save, cancel),
+            )
+        )
+        for control in controls:
+            self.add_item(control)
+        assert self.total_children_count <= MAX_COMPONENTS
 
     async def adjust_books(self, interaction: discord.Interaction) -> None:
         if not await self._authorized(interaction):
@@ -283,53 +304,53 @@ class GearEditorView(discord.ui.View):
         values = getattr(component, "values", ())
         return values[0] if values else None
 
-    async def select_slot(self, interaction: discord.Interaction) -> None:
-        if not await self._authorized(interaction):
-            return
-        value = self._selected_value("gear-editor:slot")
-        if value:
-            self.selected_slot = GearSlotCode(value)
-        self._build()
-        await interaction.response.edit_message(content=self.content, view=self)
+    def _select_category(self, slot_code: GearSlotCode):
+        async def callback(interaction: discord.Interaction) -> None:
+            if not await self._authorized(interaction):
+                return
+            value = self._selected_value(f"gear-editor:slot:{slot_code.value}")
+            self.categories[slot_code] = None if value == "MISSING" else GearClassification(value)
+            self._build()
+            await interaction.response.edit_message(view=self)
 
-    async def select_state(self, interaction: discord.Interaction) -> None:
+        return callback
+
+    async def save(self, interaction: discord.Interaction) -> None:
         if not await self._authorized(interaction):
-            return
-        value = self._selected_value("gear-editor:state")
-        if self.selected_slot is None or value is None:
-            await interaction.response.send_message(
-                "Choose a slot and state first.", ephemeral=True
-            )
             return
         with command_session(self.bot) as session:
-            static = selected(session, interaction)
-            if static.id != self.static_id:
-                raise ValueError("This gear editor is stale.")
-            character = session.scalar(
-                select(Character).where(
-                    Character.id == self.character_id,
-                    Character.active.is_(True),
-                    Character.static_member_id == self.member_id,
-                    Character.static_member.has(active=True),
-                    Character.static_member.has(static_id=self.static_id),
+            static, character = self._validated_target(session, interaction)
+            slots = list(session.scalars(select(GearSlot).order_by(GearSlot.sort_order)))
+            missing = [SLOT_LABELS[slot.code] for slot in slots if slot.code not in self.categories]
+            if missing:
+                raise ValueError("Choose a current state for: " + ", ".join(missing))
+            for target_slot in slots:
+                classification = self.categories[target_slot.code]
+                existing = session.scalar(
+                    select(CharacterGearSlot).where(
+                        CharacterGearSlot.character_id == character.id,
+                        CharacterGearSlot.gear_slot_id == target_slot.id,
+                    )
                 )
-            )
-            slot = session.scalar(select(GearSlot).where(GearSlot.code == self.selected_slot))
-            if character is None or slot is None:
-                raise ValueError("This gear editor is stale.")
-            set_gear(
-                session,
-                static,
-                character,
-                slot,
-                GearClassification(value),
-                interaction.user.id,
-            )
-        self._build(
-            f"Saved {SLOT_LABEL[self.selected_slot.value]} as "
-            f"{STATE_LABELS[GearClassification(value)]}."
+                if classification is None:
+                    if existing is not None:
+                        clear_gear(session, static, character, target_slot, interaction.user.id)
+                elif existing is None or existing.current_classification is not classification:
+                    set_gear(
+                        session, static, character, target_slot, classification, interaction.user.id
+                    )
+        self.stop()
+        await interaction.response.edit_message(
+            view=GearMessageView("Current gear saved; audit history retained.")
         )
-        await interaction.response.edit_message(content=self.content, view=self)
+
+    async def cancel(self, interaction: discord.Interaction) -> None:
+        if not await self._authorized(interaction):
+            return
+        self.stop()
+        await interaction.response.edit_message(
+            view=GearMessageView("Gear editor cancelled; no changes were written.")
+        )
 
     async def reset_slot(self, interaction: discord.Interaction) -> None:
         if not await self._authorized(interaction):
@@ -358,16 +379,4 @@ class GearEditorView(discord.ui.View):
             if row is not None:
                 clear_gear(session, static, character, slot, interaction.user.id)
         self._build(f"Cleared {SLOT_LABEL[self.selected_slot.value]}.")
-        await interaction.response.edit_message(content=self.content, view=self)
-
-    async def close(self, interaction: discord.Interaction) -> None:
-        if not await self._authorized(interaction):
-            return
-        self.closed = True
-        for item in self.walk_children():
-            if hasattr(item, "disabled"):
-                item.disabled = True
-        self.stop()
-        await interaction.response.edit_message(
-            content=f"{self.content}\nEditor closed.", view=self
-        )
+        await interaction.response.edit_message(view=self)

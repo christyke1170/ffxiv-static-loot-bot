@@ -10,7 +10,7 @@ tier-free Regular or Split reclears.
 - Gear uses `CRAFTED_EX`, `TOME`, `AUGMENTED_TOME`, `SAVAGE`, `GARBAGE`, and
   `NOT_APPLICABLE`. Specific equipment identities and item levels are not used
   for BiS completion.
-- The fixed raid structure has floors 1–4 and fixed logical loot/resource keys.
+- The fixed raid structure has floors 1-4 and fixed logical loot/resource keys.
 - Main and Alt characters belong to the same member only when configured with
   identical jobs. Split planning requires eight valid pairs and automatically
   creates complementary runs with four Mains and four Alts per run, preserving
@@ -31,7 +31,7 @@ tier-free Regular or Split reclears.
 
 1. Configure the Static, Static + Job BiS, hierarchy, characters, gear, and
    neutral resources.
-2. `/reclear setup` creates only a DRAFT week with fixed floors 1–4.
+2. `/reclear setup` creates only a DRAFT week with fixed floors 1-4.
 3. An administrator runs `/reclear plan`. Regular planning creates one V2 plan;
    Split planning automatically evaluates 35 canonical partitions and persists
    two generated runs.

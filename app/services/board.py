@@ -42,6 +42,22 @@ def display_status(result) -> DisplayStatus:
     ):
         return DisplayStatus.NA
     status_value = getattr(status, "value", status)
+    desired = getattr(result, "desired", getattr(result, "desired_classification", None))
+    if desired is current and desired in {
+        GearClassification.CRAFTED_EX,
+        GearClassification.SAVAGE,
+        GearClassification.TOME,
+        GearClassification.AUGMENTED_TOME,
+    }:
+        return DisplayStatus.BIS
+    if current is GearClassification.CRAFTED_EX:
+        return DisplayStatus.CRAFTED_EX
+    if current is GearClassification.TOME:
+        return DisplayStatus.TOME_NEEDS_AUGMENT
+    if (desired is GearClassification.SAVAGE and current is GearClassification.AUGMENTED_TOME) or (
+        desired is GearClassification.AUGMENTED_TOME and current is GearClassification.SAVAGE
+    ):
+        return DisplayStatus.ALTERNATE
     if status_value == "NOT_APPLICABLE" and current is GearClassification.GARBAGE:
         return DisplayStatus.NEEDS_REPLACEMENT
     if not isinstance(status, NeedsV2Status):
@@ -49,12 +65,6 @@ def display_status(result) -> DisplayStatus:
             return DisplayStatus.BIS
         if status_value == "INVALID_CONFIGURATION":
             return DisplayStatus.NEEDS_REPLACEMENT
-        if current is GearClassification.CRAFTED_EX:
-            return DisplayStatus.CRAFTED_EX
-        if current is GearClassification.TOME:
-            return DisplayStatus.TOME_NEEDS_AUGMENT
-        if current in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}:
-            return DisplayStatus.ALTERNATE
         return DisplayStatus.NEEDS_REPLACEMENT
     if status in {NeedsV2Status.COMPLETE, NeedsV2Status.MANUALLY_COMPLETE}:
         return DisplayStatus.BIS
@@ -62,12 +72,6 @@ def display_status(result) -> DisplayStatus:
         return DisplayStatus.NA
     if getattr(status, "value", status) == "INVALID_CONFIGURATION":
         return DisplayStatus.NEEDS_REPLACEMENT
-    if current is GearClassification.CRAFTED_EX:
-        return DisplayStatus.CRAFTED_EX
-    if current is GearClassification.TOME:
-        return DisplayStatus.TOME_NEEDS_AUGMENT
-    if current in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}:
-        return DisplayStatus.ALTERNATE
     return DisplayStatus.NEEDS_REPLACEMENT
 
 

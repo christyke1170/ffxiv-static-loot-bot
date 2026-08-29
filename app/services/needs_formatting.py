@@ -6,7 +6,7 @@ from app.schemas.needs_v2 import CharacterNeedsResult, NeedsV2Status
 def format_needs_player(result: CharacterNeedsResult) -> str:
     """Render one character's category-only needs without persistence details."""
     lines = [
-        f"{_safe(result.character_name)} â€” {_safe(result.job_abbreviation or '?')}",
+        f"{_safe(result.character_name)} - {_safe(result.job_abbreviation or '?')}",
         f"Complete: {result.complete_slot_count}/{result.applicable_slot_count} applicable slots",
         f"Full BiS: {'yes' if result.full_bis else 'no'}",
     ]

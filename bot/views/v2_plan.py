@@ -17,7 +17,7 @@ def _recipient(assignment, names: dict[int, str]) -> str:
 
 def _assignment_line(assignment, names: dict[int, str]) -> str:
     effects = ", ".join(
-        f"{effect.slot_key.title()} â†’ {effect.resulting_category.replace('_', ' ').title()}"
+        f"{effect.slot_key.title()} -> {effect.resulting_category.replace('_', ' ').title()}"
         for effect in assignment.gear_effects
     )
     resource = (
@@ -36,7 +36,7 @@ def v2_plan_pages(result, names: dict[int, str] | None = None) -> list[str]:
     names = names or {}
     proposal = result.proposal
     lines = [
-        f"**V2 Weekly Plan â€” Static {proposal.static_id}**",
+        f"**V2 Weekly Plan - Static {proposal.static_id}**",
         f"Week: {proposal.week_id} (week {proposal.week_number})",
         f"Mode: {proposal.mode.value.title()}",
         "",
@@ -91,7 +91,7 @@ def v2_plan_pages(result, names: dict[int, str] | None = None) -> list[str]:
             "**Free-for-all / unassigned resources**\n"
             + "\n".join(
                 f"- Floor {row.floor_number}: "
-                f"{getattr(row, 'loot_type', None) or getattr(row, 'loot_key', 'resource')} â€” "
+                f"{getattr(row, 'loot_type', None) or getattr(row, 'loot_key', 'resource')} - "
                 f"{row.reason}"
                 for row in unassigned
             )

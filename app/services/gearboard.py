@@ -19,9 +19,6 @@ def classify_gear_state(result: NeedsV2SlotResult) -> DisplayStatus:
     # Crafted, EX, Tome, or another current-gear source.
     if result.status in {NeedsV2Status.COMPLETE, NeedsV2Status.MANUALLY_COMPLETE}:
         return DisplayStatus.BIS
-    if result.status is NeedsV2Status.INVALID_CONFIGURATION:
-        return DisplayStatus.NEEDS_REPLACEMENT
-
     desired = result.desired_classification
     current = result.current_classification
     if desired is current and desired in {
@@ -33,8 +30,12 @@ def classify_gear_state(result: NeedsV2SlotResult) -> DisplayStatus:
         return DisplayStatus.BIS
     if current is GearClassification.CRAFTED_EX:
         return DisplayStatus.CRAFTED_EX
+    if result.status is NeedsV2Status.INVALID_CONFIGURATION:
+        return DisplayStatus.NEEDS_REPLACEMENT
 
-    if current in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}:
+    if (desired is GearClassification.SAVAGE and current is GearClassification.AUGMENTED_TOME) or (
+        desired is GearClassification.AUGMENTED_TOME and current is GearClassification.SAVAGE
+    ):
         return DisplayStatus.ALTERNATE
     if current is GearClassification.TOME:
         return DisplayStatus.TOME_NEEDS_AUGMENT

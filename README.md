@@ -24,6 +24,11 @@ The scripts create `.venv`, install `.[dev]`, copy `.env.example` only when
 `.env` does not exist, and run migrations. They never overwrite an existing
 environment file or database.
 
+On a fresh database, an administrator must run `/setup seed` once after the
+migrations. This creates the global job and gear-slot reference data and
+initializes missing static hierarchies. The command is safe to repeat and is
+not required again for each newly created Static.
+
 Manual setup:
 
 ```sh
@@ -58,7 +63,7 @@ WAL, and a busy timeout but is a one-process deployment only.
 ## Current domain and planning rules
 
 - BiS is configured once per Static and Job and stores desired slot categories.
-- Floors are fixed at 1–4 with fixed logical loot/resource keys.
+- Floors are fixed at 1-4 with fixed logical loot/resource keys.
 - Regular mode creates one eight-Main run.
 - Split mode automatically evaluates 35 canonical partitions. Each Main/Alt pair
   uses identical jobs, appears in opposite runs, and each run contains 2 Tanks,
@@ -70,6 +75,7 @@ WAL, and a busy timeout but is a one-process deployment only.
 - Books are informational only and never affect proposals.
 - `/reclear setup` creates only a DRAFT week; an administrator runs
   `/reclear plan` to generate the V2 plan.
+- Reference-backed commands require the one-time fresh-database `/setup seed`.
 
 ## Discord command surface
 

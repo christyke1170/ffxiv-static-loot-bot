@@ -5,14 +5,16 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.models import CharacterKind
-from bot.checks import is_raid_leader
+from bot.checks import is_raid_leader, require_bot_admin, require_raid_leader
 from bot.services.admin import (
     add_character,
+    delete_character,
     edit_character,
     resolve_member_character,
     set_character_active,
 )
 from bot.services.commands import command_session, defer, pages, reply, selected
+from bot.views.deletion import DeleteConfirmationView
 
 
 class Character(commands.Cog):
@@ -46,6 +48,64 @@ class Character(commands.Cog):
             f"Created {discord.utils.escape_markdown(row.name)} ({row.kind}).",
             ephemeral=True,
         )
+
+    @group.command(
+        name="add-for",
+        description="Add a character to an existing static member (raid leader only)",
+    )
+    @require_raid_leader(None)
+    async def add_for(
+        self,
+        interaction,
+        member: discord.Member,
+        name: str,
+        world: str,
+        kind: str,
+        job: str,
+    ):
+        await defer(interaction, ephemeral=True)
+        try:
+            character_kind = CharacterKind[kind.upper()]
+        except KeyError as exc:
+            raise ValueError("Character kind must be MAIN or ALT.") from exc
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            target_member = next(
+                (row for row in static.members if row.active and row.discord_user_id == member.id),
+                None,
+            )
+            if target_member is None:
+                raise ValueError(
+                    "That Discord member is not an active member of the selected static."
+                )
+            row = add_character(session, target_member, name, world, character_kind, job)
+        await reply(
+            interaction,
+            f"Created {discord.utils.escape_markdown(row.name)} ({row.kind}) for "
+            f"{discord.utils.escape_markdown(target_member.display_name)}.",
+            ephemeral=True,
+        )
+
+    @group.command(name="delete", description="Permanently delete a character")
+    @require_bot_admin(None)
+    async def delete(self, interaction, member: discord.Member, current_name: str):
+        await defer(interaction, ephemeral=True)
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            owner, target = resolve_member_character(session, static, member.id, current_name)
+            name = target.name
+            static_id = static.id
+
+        async def confirm(callback_interaction):
+            with command_session(self.bot) as session:
+                target_static = session.get(type(static), static_id)
+                if target_static is None:
+                    raise ValueError("The selected static no longer exists.")
+                delete_character(session, target_static, member.id, current_name)
+            return f"Character **{discord.utils.escape_markdown(name)}** permanently deleted."
+
+        view = DeleteConfirmationView(confirm, f"Permanently delete character **{name}**?")
+        await interaction.followup.send(view.prompt, view=view, ephemeral=True)
 
     @group.command(
         name="edit", description="Correct a character while preserving all relationships"
@@ -138,8 +198,8 @@ class Character(commands.Cog):
                 m for m in static.members if member is None or m.discord_user_id == member.id
             ]
             rows = [
-                f"{c.name}@{c.world} â€” {c.job.abbreviation} â€” "
-                f"{c.kind} â€” {'active' if c.active else 'inactive'}"
+                f"{c.name}@{c.world} - {c.job.abbreviation} - "
+                f"{c.kind} - {'active' if c.active else 'inactive'}"
                 for m in members
                 for c in m.characters
                 if kind is None or c.kind.value == kind.upper()

@@ -28,7 +28,7 @@ def confirmation_state_text(state) -> str:
     if state.effects:
         lines.append(
             "Applied effects: "
-            + ", ".join(f"{row.slot_key} â†’ {row.after_category}" for row in state.effects)
+            + ", ".join(f"{row.slot_key} -> {row.after_category}" for row in state.effects)
         )
     if state.balances:
         lines.append(
@@ -168,10 +168,9 @@ class V2ConfirmationView(discord.ui.LayoutView):
         try:
             with command_session(self.bot) as session:
                 operation(session, interaction.user.id)
-                state = read_v2_confirmation_state(session, self.assignment_id)
-            await interaction.response.edit_message(
-                content=confirmation_state_text(state), view=self
-            )
+                read_v2_confirmation_state(session, self.assignment_id)
+            self._build()
+            await interaction.response.edit_message(view=self)
         except (V2ConfirmationError, ValueError) as error:
             await interaction.response.send_message(str(error)[:500], ephemeral=True)
 
@@ -243,10 +242,9 @@ class V2ConfirmationView(discord.ui.LayoutView):
     async def refresh(self, interaction):
         try:
             with command_session(self.bot) as session:
-                state = read_v2_confirmation_state(session, self.assignment_id)
-            await interaction.response.edit_message(
-                content=confirmation_state_text(state), view=self
-            )
+                read_v2_confirmation_state(session, self.assignment_id)
+            self._build()
+            await interaction.response.edit_message(view=self)
         except (V2ConfirmationError, ValueError) as error:
             await interaction.response.send_message(str(error)[:500], ephemeral=True)
 

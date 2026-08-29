@@ -115,6 +115,116 @@ async def test_user_cannot_add_character_under_another_member(bot, interaction_f
     assert "active member of the selected static" in command_interaction.messages[0]["content"]
 
 
+async def test_raid_leader_can_add_character_for_another_existing_member(bot, interaction_factory):
+    arrange_static(bot)
+    target = FakeDiscordMember(id=300)
+    await invoke_registered(Member(bot), "add", interaction_factory(), target, "Rise")
+    from app.services import seed_reference_data
+
+    with bot.session_factory() as session:
+        seed_reference_data(session)
+        session.commit()
+
+    interaction = interaction_factory()
+    await invoke_registered(
+        CharacterCog(bot),
+        "add-for",
+        interaction,
+        target,
+        "R'ise Kujikawa",
+        "Midgardsormr",
+        "MAIN",
+        "NIN",
+    )
+
+    with bot.session_factory() as session:
+        row = session.scalar(select(Character).where(Character.name == "R'ise Kujikawa"))
+        assert row is not None
+        assert row.static_member.discord_user_id == 300
+    assert "for Rise" in interaction.messages[0]["content"]
+
+
+async def test_non_leader_cannot_add_character_for_another_member(bot, interaction_factory):
+    arrange_static(bot)
+    target = FakeDiscordMember(id=300)
+    await invoke_registered(Member(bot), "add", interaction_factory(), target, "Rise")
+    interaction = interaction_factory(roles=())
+
+    await invoke_registered(
+        CharacterCog(bot), "add-for", interaction, target, "Alt", "World", "ALT", "NIN"
+    )
+
+    with bot.session_factory() as session:
+        assert session.scalar(select(Character)) is None
+    assert "permission" in interaction.messages[0]["content"]
+
+
+async def test_member_delete_requires_confirmation_and_removes_member_characters(
+    bot, interaction_factory
+):
+    static_id = arrange_static(bot)
+    target = FakeDiscordMember(id=300)
+    await invoke_registered(Member(bot), "add", interaction_factory(), target, "Rise")
+    from app.services import seed_reference_data
+
+    with bot.session_factory() as session:
+        seed_reference_data(session)
+        session.commit()
+    await invoke_registered(
+        CharacterCog(bot),
+        "add-for",
+        interaction_factory(),
+        target,
+        "Rise Alt",
+        "World",
+        "ALT",
+        "NIN",
+    )
+    interaction = interaction_factory(administrator=True)
+    await invoke_registered(Member(bot), "delete", interaction, target)
+
+    prompt = interaction.followup.messages[0]
+    with bot.session_factory() as session:
+        assert (
+            session.scalar(select(StaticMember).where(StaticMember.static_id == static_id))
+            is not None
+        )
+    await prompt["view"].confirm(interaction_factory(administrator=True))
+    with bot.session_factory() as session:
+        assert (
+            session.scalar(select(StaticMember).where(StaticMember.static_id == static_id)) is None
+        )
+        assert session.scalar(select(Character)) is None
+
+
+async def test_character_delete_requires_confirmation(bot, interaction_factory):
+    arrange_static(bot)
+    target = FakeDiscordMember(id=300)
+    await invoke_registered(Member(bot), "add", interaction_factory(), target, "Rise")
+    from app.services import seed_reference_data
+
+    with bot.session_factory() as session:
+        seed_reference_data(session)
+        session.commit()
+    await invoke_registered(
+        CharacterCog(bot),
+        "add-for",
+        interaction_factory(),
+        target,
+        "Rise Alt",
+        "World",
+        "ALT",
+        "NIN",
+    )
+    interaction = interaction_factory(administrator=True)
+    await invoke_registered(CharacterCog(bot), "delete", interaction, target, "Rise Alt")
+
+    prompt = interaction.followup.messages[0]
+    await prompt["view"].confirm(interaction_factory(administrator=True))
+    with bot.session_factory() as session:
+        assert session.scalar(select(Character).where(Character.name == "Rise Alt")) is None
+
+
 async def test_inactive_member_cannot_add_character(bot, interaction_factory):
     arrange_static(bot)
     leader = interaction_factory()

@@ -94,8 +94,8 @@ def test_regular_formatting_includes_neutral_assignments_effects_and_warning():
     text = "\n".join(v2_plan_pages(_regular_result(), {10: "Main One"}))
     assert "V2 Weekly Plan" in text
     assert "WEAPON_COFFER" in text
-    assert "Weapon â†’ Savage" in text
-    assert "Offhand â†’ Savage" in text
+    assert "Weapon -> Savage" in text
+    assert "Offhand -> Savage" in text
     assert "ARMOR_TWINE" in text
     assert "configuration warning" in text
     assert "tier" not in text.lower()
@@ -168,7 +168,8 @@ async def test_confirmation_retry_callback_calls_only_v2_receipt_and_resumes_sta
             lambda session, actor: receipt(session, 1, "ARMOR_TWINE", True, actor_id=actor),
         )
     receipt.assert_called_once()
-    assert "ARMOR_TWINE" in interaction.response.edits[0]["content"]
+    assert "content" not in interaction.response.edits[0]
+    assert interaction.response.edits[0]["view"] is view
 
 
 def test_view_modules_do_not_import_legacy_plan_or_confirmation_services():

@@ -3,10 +3,11 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from bot.checks import is_raid_leader, require_raid_leader
+from bot.checks import is_raid_leader, require_bot_admin, require_raid_leader
 from bot.services.admin import (
     create_static,
     deactivate_static,
+    delete_static,
     edit_static,
     guild,
     list_statics,
@@ -15,6 +16,7 @@ from bot.services.admin import (
     select_static,
 )
 from bot.services.commands import command_session, defer, guild_context, pages, reply, selected
+from bot.views.deletion import DeleteConfirmationView
 
 
 class Static(commands.Cog):
@@ -75,6 +77,23 @@ class Static(commands.Cog):
             f"Static **{discord.utils.escape_markdown(row.name)}** reactivated.",
             ephemeral=True,
         )
+
+    @group.command(name="delete", description="Permanently delete a static")
+    @require_bot_admin(None)
+    async def delete(self, interaction, static_id: int):
+        await defer(interaction, ephemeral=True)
+        with command_session(self.bot) as session:
+            row = resolve_static(session, interaction.guild.id, static_id)
+            name = row.name
+
+        async def confirm(callback_interaction):
+            with command_session(self.bot) as session:
+                target = resolve_static(session, callback_interaction.guild.id, static_id)
+                delete_static(session, target)
+            return f"Static **{discord.utils.escape_markdown(name)}** permanently deleted."
+
+        view = DeleteConfirmationView(confirm, f"Permanently delete static **{name}**?")
+        await interaction.followup.send(view.prompt, view=view, ephemeral=True)
 
     @group.command(name="list")
     async def list(self, interaction):

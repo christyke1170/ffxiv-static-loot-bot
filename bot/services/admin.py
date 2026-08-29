@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.database import Base
 from app.models import (
     AuditLog,
     BisSet,
@@ -173,6 +174,50 @@ def add_member(session: Session, static: Static, user_id: int, display_name: str
     session.add(row)
     session.flush()
     return row
+
+
+def _delete_entity(session: Session, table, entity_id: int) -> None:
+    """Delete an entity and all rows that depend on it through FK relationships."""
+    pending = [(table, {entity_id})]
+    visited: set[tuple[object, int]] = set()
+    order = []
+    while pending:
+        parent, ids = pending.pop()
+        key = (parent, tuple(sorted(ids)))
+        if key in visited:
+            continue
+        visited.add(key)
+        order.append((parent, ids))
+        for child in Base.metadata.sorted_tables:
+            for foreign_key in child.foreign_keys:
+                if foreign_key.column.table is not parent:
+                    continue
+                child_pk = next(iter(child.primary_key.columns), None)
+                if child_pk is None:
+                    continue
+                child_ids = set(
+                    session.scalars(select(child_pk).where(foreign_key.parent.in_(ids)))
+                )
+                if child_ids:
+                    pending.append((child, child_ids))
+    for child, ids in reversed(order):
+        session.execute(child.delete().where(next(iter(child.primary_key.columns)).in_(ids)))
+
+
+def delete_static(session: Session, static: Static) -> None:
+    _delete_entity(session, Static.__table__, static.id)
+
+
+def delete_member(session: Session, static: Static, user_id: int) -> None:
+    member = _member(session, static, user_id)
+    _delete_entity(session, StaticMember.__table__, member.id)
+
+
+def delete_character(
+    session: Session, static: Static, member_user_id: int, current_name: str
+) -> None:
+    _, character = resolve_member_character(session, static, member_user_id, current_name)
+    _delete_entity(session, Character.__table__, character.id)
 
 
 def deactivate_member(

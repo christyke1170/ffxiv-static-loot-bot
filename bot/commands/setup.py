@@ -42,11 +42,16 @@ class Setup(commands.Cog):
             if self.bot.settings.dev_guild_id
             else "global"
         )
+        seed_guidance = (
+            "\nAction required: run `/setup seed` once for this fresh database."
+            if jobs < 21 or slots < 12
+            else ""
+        )
         await reply(
             interaction,
             f"Version: 0.1.0\nDatabase: {db}\nMigration: {current} / {expected}\n"
             f"Seed records: jobs {jobs}/21, gear slots {slots}/12\n"
-            f"Guild: {guild_id}\nSync: {sync}\nStatics: {statics}",
+            f"Guild: {guild_id}\nSync: {sync}\nStatics: {statics}{seed_guidance}",
             ephemeral=True,
         )
 
