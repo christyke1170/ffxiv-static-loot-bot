@@ -65,3 +65,5 @@ class RegularPlanProposal:
     assignments: tuple[RegularAssignment, ...]
     unassigned: tuple[UnassignedRegularLoot, ...]
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    static_name: str | None = None
+    week_start: object | None = None

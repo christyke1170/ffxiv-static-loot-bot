@@ -128,7 +128,7 @@ def _slot(state, slot, owned, categorized, coffers, coffer_used, material_used):
                 "The base Tome is owned but augmentation material is needed.",
             )
 
-    if desired not in (None, GearClassification.NOT_APPLICABLE) and status not in {
+    if desired is GearClassification.SAVAGE and status not in {
         NeedsV2Status.INVALID_CONFIGURATION,
         NeedsV2Status.MANUALLY_COMPLETE,
         NeedsV2Status.COMPLETE,
@@ -141,18 +141,48 @@ def _slot(state, slot, owned, categorized, coffers, coffer_used, material_used):
             warnings.append("Missing loot type configuration.")
         if _rule_for(state, slot) is None and slot.required_loot_type_id is not None:
             warnings.append("Missing floor loot rule configuration.")
-        if desired is GearClassification.AUGMENTED_TOME and (
+    elif (
+        desired is GearClassification.AUGMENTED_TOME
+        and status
+        not in {
+            NeedsV2Status.INVALID_CONFIGURATION,
+            NeedsV2Status.MANUALLY_COMPLETE,
+            NeedsV2Status.COMPLETE,
+        }
+        and (
             slot.required_material_type_id is None
             or not any(
                 row.material_type_id == slot.required_material_type_id for row in state.materials
             )
-        ):
-            warnings.append("Missing augmentation-material configuration.")
-        if warnings:
-            status, explanation = (
-                NeedsV2Status.INVALID_CONFIGURATION,
-                "Configuration is incomplete.",
+        )
+    ):
+        warnings.append("Missing augmentation-material configuration.")
+    if (
+        desired is GearClassification.AUGMENTED_TOME
+        and status
+        not in {
+            NeedsV2Status.INVALID_CONFIGURATION,
+            NeedsV2Status.MANUALLY_COMPLETE,
+            NeedsV2Status.COMPLETE,
+        }
+        and (
+            slot.required_material_type_id is None
+            or not any(
+                row.material_type_id == slot.required_material_type_id for row in state.materials
             )
+        )
+    ):
+        status, explanation = NeedsV2Status.INVALID_CONFIGURATION, "Configuration is incomplete."
+    if (
+        desired is GearClassification.SAVAGE
+        and warnings
+        and status
+        not in {
+            NeedsV2Status.MANUALLY_COMPLETE,
+            NeedsV2Status.COMPLETE,
+        }
+    ):
+        status, explanation = NeedsV2Status.INVALID_CONFIGURATION, "Configuration is incomplete."
 
     return NeedsV2SlotResult(
         state.character_id,

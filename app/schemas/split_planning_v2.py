@@ -107,6 +107,8 @@ class SplitPlanProposal:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     score: SplitPartitionScore | None = None
     partitions_evaluated: int = 0
+    static_name: str | None = None
+    week_start: object | None = None
 
 
 class SplitPlanningV2Error(ValueError):

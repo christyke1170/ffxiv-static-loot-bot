@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import func, select
 
 from app.config import Settings
@@ -160,7 +159,7 @@ async def test_regular_command_workflow_reaches_closed_v2_week(engine):
         assert session.scalar(select(ReclearWeek)).workflow_state is ReclearWorkflowState.DRAFT
     status = _interaction(bot)
     await invoke_registered(Reclear(bot), "status", status)
-    assert "V2 plan:** present" in "\n".join(m["content"] or "" for m in status.messages)
+    assert "Loot plan:** generated" in "\n".join(m["content"] or "" for m in status.messages)
     await invoke_registered(Reclear(bot), "complete", _interaction(bot), 2)
     confirmation = V2ConfirmationView(bot, assignment_id, static_id, 200, resource_key)
     await confirmation.receipt_success(_interaction(bot, administrator=True))
@@ -355,8 +354,13 @@ async def test_split_command_workflow_persists_two_optimizer_runs_and_paired_res
     assert "correction recorded" in correction.followup.messages[0]["content"]
     cancel = _interaction(bot)
     await invoke_registered(Reclear(bot), "cancel", cancel, "already started")
-    with pytest.raises(ValueError, match="cannot be cancelled"):
-        await cancel.messages[0]["view"].confirm(_interaction(bot))
+    cancellation_result = _interaction(bot)
+    await cancel.messages[0]["view"].confirm(cancellation_result)
+    cancellation_edit = cancellation_result.response.edits[0]
+    assert "content" not in cancellation_edit
+    assert (
+        cancellation_edit["view"].children[0].children[0].content.endswith("cannot be cancelled.")
+    )
     for _ in range(100):
         with bot.session_factory() as session:
             week = session.scalar(select(ReclearWeek))

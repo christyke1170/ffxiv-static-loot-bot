@@ -18,22 +18,50 @@ from app.services import (
 from bot.checks import is_bot_admin
 from bot.services.commands import command_session, selected
 
+RESOURCE_LABELS = {
+    "ACCESSORY_COFFER": "Accessory Coffer",
+    "HEAD_COFFER": "Head Coffer",
+    "CHEST_COFFER": "Chest Coffer",
+    "GLOVES_COFFER": "Gloves Coffer",
+    "BOOTS_COFFER": "Boots Coffer",
+    "PANTS_COFFER": "Pants Coffer",
+    "ARMOR_TWINE": "Armor Twine",
+    "ACCESSORY_GLAZE": "Accessory Glaze",
+    "WEAPON_TOMESTONE": "Weapon Tomestone",
+    "WEAPON_AUGMENT": "Weapon Augment",
+}
+
+
+def _resource_label(value):
+    return RESOURCE_LABELS.get(value, value.replace("_", " ").title())
+
 
 def confirmation_state_text(state) -> str:
     """Format immutable confirmation state without exposing internal IDs."""
-    lines = ["**V2 confirmation state**"]
+    lines = ["**Loot confirmation state**"]
     for row in state.confirmations:
         outcome = "confirmed" if row.success else "rejected"
-        lines.append(f"- {row.resource_key}: {row.action.lower()} {outcome} (x{row.quantity})")
+        lines.append(
+            f"- {_resource_label(row.resource_key)}: {row.action.lower()} "
+            f"{outcome} (x{row.quantity})"
+        )
     if state.effects:
         lines.append(
             "Applied effects: "
-            + ", ".join(f"{row.slot_key} -> {row.after_category}" for row in state.effects)
+            + ", ".join(
+                f"{row.slot_key.replace('_', ' ').title()} -> "
+                f"{row.after_category.replace('_', ' ').title()}"
+                for row in state.effects
+            )
         )
     if state.balances:
         lines.append(
             "Owned resources: "
-            + ", ".join(f"{key} x{quantity}" for key, quantity in state.balances if quantity)
+            + ", ".join(
+                f"{_resource_label(key)} x{quantity}"
+                for key, quantity in state.balances
+                if quantity
+            )
         )
     return "\n".join(lines)[:1990]
 
@@ -71,7 +99,7 @@ class V2CorrectionModal(discord.ui.Modal, title="V2 administrator correction"):
                         session, self.confirmation_id, True, interaction.user.id, str(self.reason)
                     )
             await interaction.response.send_message(
-                "V2 correction recorded; history was retained.", ephemeral=True
+                "Loot correction recorded; history was retained.", ephemeral=True
             )
         except (V2ConfirmationError, ValueError) as error:
             await interaction.response.send_message(str(error)[:500], ephemeral=True)

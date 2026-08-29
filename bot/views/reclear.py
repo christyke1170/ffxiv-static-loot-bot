@@ -1,6 +1,7 @@
 """Components V2 weekly roster previews and completion confirmations."""
 
 import discord
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.models import ClearMode
 from app.services.reclear import create_reclear_week, preview_rosters
@@ -15,6 +16,13 @@ def roster_text(rosters) -> str:
         lines = [f"- {character.name} ({character.kind.value.title()})" for character in roster]
         sections.append(f"**{title}**\n" + "\n".join(lines))
     return "\n\n".join(sections)[:1900]
+
+
+def message_view(text: str) -> discord.ui.LayoutView:
+    """Build a component-v2-only view for replacing an interactive message."""
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(discord.ui.Container(discord.ui.TextDisplay(text[:1900])))
+    return view
 
 
 class SetupPreviewView(discord.ui.LayoutView):
@@ -71,24 +79,30 @@ class SetupPreviewView(discord.ui.LayoutView):
         await interaction.response.edit_message(view=self)
 
     async def confirm(self, interaction):
-        with command_session(self.bot) as session:
-            static = selected(session, interaction)
-            if static.id != self.static_id:
-                raise ValueError("This setup preview is stale for the selected static.")
-            week = create_reclear_week(
-                session,
-                static,
-                self.mode,
-                # Split membership is deliberately left to the V2 optimizer.
-                split_a_main_member_ids=self.selected_ids or None,
-                notes=self.notes,
-                actor_discord_user_id=interaction.user.id,
-            )
-            text = f"Reclear week {week.week_start} saved as DRAFT."
-        self._build(notice=text)
-        self._disable()
-        await interaction.response.edit_message(view=self)
-        self.stop()
+        try:
+            with command_session(self.bot) as session:
+                static = selected(session, interaction)
+                if static.id != self.static_id:
+                    raise ValueError("This setup preview is stale for the selected static.")
+                week = create_reclear_week(
+                    session,
+                    static,
+                    self.mode,
+                    # Split membership is deliberately left to the V2 optimizer.
+                    split_a_main_member_ids=self.selected_ids or None,
+                    notes=self.notes,
+                    actor_discord_user_id=interaction.user.id,
+                )
+                text = f"Reclear week {week.week_start} saved as DRAFT."
+            self._build(notice=text)
+            self._disable()
+            await interaction.response.edit_message(view=self)
+            self.stop()
+        except (ValueError, SQLAlchemyError) as error:
+            self._build(notice=f"Setup could not be saved: {error}")
+            self._disable()
+            await interaction.response.edit_message(view=self)
+            self.stop()
 
     async def reset_selection(self, interaction):
         self.selected_ids.clear()

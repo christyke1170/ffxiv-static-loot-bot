@@ -1,11 +1,11 @@
 """Orchestration boundary tests for Regular and Split V2 planning."""
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 import pytest
 
-from app.models import ClearMode, V2Plan
+from app.models import ClearMode, ReclearWeek, V2Plan
 from app.services.reclear import create_reclear_week
 from app.services.v2_plan_orchestration import (
     V2PlanOrchestrationError,
@@ -35,6 +35,14 @@ def test_split_mode_dispatches_split_v2_only(session):
     static, week = _setup(session, ClearMode.SPLIT)
     result = generate_and_persist_weekly_plan(session, static.id, week.id, 100)
     assert result.proposal.mode is ClearMode.SPLIT
+
+
+def test_reclear_week_sets_creation_time_for_sqlite(session):
+    static = _static(session)
+    week = create_reclear_week(session, static, ClearMode.SPLIT, week_start=date(2026, 8, 24))
+
+    assert isinstance(week.created_at, datetime)
+    assert session.get(ReclearWeek, week.id).created_at is not None
 
 
 def test_split_planning_works_without_saved_groups(session):

@@ -86,8 +86,8 @@ def generate_and_persist_weekly_plan(session, static_id: int, week_id: int, acto
 
 
 def _validate_state(state):
-    if state.week_status in {ReclearWorkflowState.CANCELLED, ReclearWorkflowState.CLOSED}:
-        raise V2PlanOrchestrationError("Cancelled or closed weeks cannot create a new V2 plan.")
+    if state.week_status is ReclearWorkflowState.CLOSED:
+        raise V2PlanOrchestrationError("Closed weeks cannot create a new loot plan.")
     if not state.mains:
         raise V2PlanOrchestrationError("A weekly V2 plan requires active Main characters.")
     if state.mode is ClearMode.SPLIT and len(state.alts) != len(state.mains):

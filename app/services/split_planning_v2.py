@@ -92,6 +92,8 @@ def generate_split_plan_v2(state: PlanningState) -> SplitPlanProposal:
         tuple(dict.fromkeys(warnings)),
         score,
         len(candidates),
+        state.static_name,
+        state.week_start,
     )
     return SplitPlanProposal(
         state.static_id,
@@ -104,6 +106,8 @@ def generate_split_plan_v2(state: PlanningState) -> SplitPlanProposal:
         tuple(dict.fromkeys(warnings)),
         score,
         len(candidates),
+        state.static_name,
+        state.week_start,
     )
 
 
@@ -298,7 +302,7 @@ def _plan_group(state, group_id, group_number, participants, ownership, reverse_
                     drop.loot_type,
                     drop.slot,
                     drop.material_type,
-                    "No participating character has a matching incomplete V2 need.",
+                    "No participating character has a matching incomplete need.",
                 )
             )
             continue
@@ -405,7 +409,7 @@ def _candidates(state, participants, drop, used, ownership, reverse_ownership):
         if not _floor_eligible(state, character.character_id, drop.floor):
             continue
         needs = character.needs
-        if needs is None or needs.configuration_warnings:
+        if needs is None:
             continue
         if drop.slot is None:
             rows = [

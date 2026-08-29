@@ -17,6 +17,9 @@ from app.models import (
     ReclearWeek,
     ReclearWeekFloor,
     ReclearWorkflowState,
+    V2Confirmation,
+    V2Plan,
+    V2PlanAssignment,
 )
 from app.services.weeks import ResetPeriodPolicy, snapshot_hierarchy
 
@@ -108,6 +111,7 @@ def create_reclear_week(
         week_start=week_start,
         clear_mode=mode,
         workflow_state=ReclearWorkflowState.DRAFT,
+        created_at=datetime.now(UTC),
         notes=notes,
     )
     week.neutral_floors = [ReclearWeekFloor(floor_number=n) for n in loot_rules.floors()]
@@ -157,26 +161,29 @@ def cancel_reclear_week(session, static_id, reason, actor, today=None):
     week = current_week(session, static_id, today)
     if week.workflow_state is ReclearWorkflowState.CLOSED:
         raise ValueError("A closed reclear cannot be cancelled.")
-    if week.workflow_state is ReclearWorkflowState.CANCELLED:
-        return week
-    if session.scalar(
-        select(__import__("app.models", fromlist=["V2Plan"]).V2Plan.id).where(
-            __import__("app.models", fromlist=["V2Plan"]).V2Plan.reclear_week_id == week.id
+    plan_id = session.scalar(select(V2Plan.id).where(V2Plan.reclear_week_id == week.id))
+    if plan_id is not None:
+        has_confirmation = session.scalar(
+            select(V2Confirmation.id)
+            .join(V2PlanAssignment, V2Confirmation.assignment_id == V2PlanAssignment.id)
+            .where(V2PlanAssignment.plan_id == plan_id)
         )
-    ):
-        raise ValueError("A reclear with a V2 plan cannot be cancelled.")
-    week.workflow_state = ReclearWorkflowState.CANCELLED
-    week.finalized_at = datetime.now(UTC)
+        if has_confirmation is not None:
+            raise ValueError("A reclear with confirmed loot history cannot be cancelled.")
+        plan = session.get(V2Plan, plan_id)
+        session.delete(plan)
+        session.flush()
     session.add(
         AuditLog(
             static_id=static_id,
             actor_discord_user_id=actor,
-            action="RECLEAR_WEEK_CANCELLED",
-            entity_type="ReclearWeek",
-            entity_id=str(week.id),
+            action="LOOT_PLAN_CANCELLED",
+            entity_type="V2Plan",
+            entity_id=str(plan_id) if plan_id is not None else str(week.id),
             details=reason,
         )
     )
+    session.flush()
     return week
 
 

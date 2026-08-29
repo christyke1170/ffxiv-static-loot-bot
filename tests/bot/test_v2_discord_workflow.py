@@ -92,11 +92,11 @@ def _split_result():
 
 def test_regular_formatting_includes_neutral_assignments_effects_and_warning():
     text = "\n".join(v2_plan_pages(_regular_result(), {10: "Main One"}))
-    assert "V2 Weekly Plan" in text
-    assert "WEAPON_COFFER" in text
+    assert "Weekly Loot Plan" in text
+    assert "Weapon Coffer" in text
     assert "Weapon -> Savage" in text
     assert "Offhand -> Savage" in text
-    assert "ARMOR_TWINE" in text
+    assert "Armor Twine" in text
     assert "configuration warning" in text
     assert "tier" not in text.lower()
     assert "item_id" not in text.lower()
@@ -108,7 +108,7 @@ def test_split_formatting_shows_two_generated_runs_and_main_alt_labels():
         v2_plan_pages(_split_result(), {1: "Main A", 2: "Alt A", 3: "Main B", 4: "Alt B"})
     )
     assert "Run A roster" in text and "Run B roster" in text
-    assert "TOME_WEAPON_RESOURCES" in text
+    assert "Tome Weapon Resources" in text
     assert "Main A" in text
     assert "Alt A" in text
 
@@ -133,7 +133,7 @@ def test_confirmation_state_displays_partial_completed_rejected_and_owned_resour
     )
     text = confirmation_state_text(state)
     assert "confirmed" in text and "rejected" in text
-    assert "WEAPON_TOMESTONE" in text
+    assert "Weapon Tomestone" in text
 
 
 @pytest.mark.asyncio

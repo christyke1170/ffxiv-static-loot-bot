@@ -1,4 +1,4 @@
-"""Discord weekly reclear workflow commands backed only by neutral V2 services."""
+"""Discord weekly reclear workflow commands backed by neutral planning services."""
 
 from typing import Literal
 
@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from app.models import V2Confirmation, V2Plan, V2PlanAssignment, WeeklyLockout
+from app.models import Character, V2Confirmation, V2Plan, V2PlanAssignment
 from app.services import close_v2_week, generate_and_persist_weekly_plan
 from app.services.reclear import (
     cancel_reclear_week,
@@ -15,13 +15,48 @@ from app.services.reclear import (
 )
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
-from bot.views.reclear import ConfirmActionView, SetupPreviewView, roster_text
+from bot.views.reclear import ConfirmActionView, SetupPreviewView, message_view, roster_text
 from bot.views.v2_confirmation import V2ConfirmationView
 from bot.views.v2_plan import V2PlanView
 
 
 def _plan(session, week_id):
     return session.scalar(select(V2Plan).where(V2Plan.reclear_week_id == week_id))
+
+
+def _presentation(session, result):
+    proposal = result.proposal
+    ids = {
+        identifier
+        for group in getattr(proposal, "groups", ())
+        for identifier in group.participant_ids
+    }
+    ids.update(
+        assignment.recipient_id
+        for group in getattr(proposal, "groups", ())
+        for assignment in group.assignments
+        if assignment.recipient_id is not None
+    )
+    ids.update(
+        assignment.recipient_id
+        for assignment in getattr(proposal, "assignments", ())
+        if assignment.recipient_id is not None
+    )
+    characters = (
+        session.scalars(select(Character).where(Character.id.in_(ids))).all() if ids else ()
+    )
+    names = {
+        row.id: f"{row.name} - {row.kind.value.title()} - {row.job.abbreviation}"
+        for row in characters
+    }
+    missing = ids - names.keys()
+    if missing:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Plan references missing character IDs: %s", sorted(missing)
+        )
+    return names, proposal.static_name if hasattr(proposal, "static_name") else None
 
 
 def _next_confirmation(bot, session, week, owner_id):
@@ -80,7 +115,7 @@ class Reclear(commands.Cog):
             view._build(preview)
         await interaction.response.send_message(view=view, ephemeral=True)
 
-    @group.command(name="status", description="Show this reset's neutral V2 status")
+    @group.command(name="status", description="Show this reset's loot plan status")
     async def status(self, interaction):
         await defer(interaction)
         with command_session(self.bot) as session:
@@ -90,11 +125,11 @@ class Reclear(commands.Cog):
                 f"**Reset week:** {week.week_start}\n"
                 f"**Mode:** {week.clear_mode.value.title()}\n"
                 f"**Workflow:** {week.workflow_state.value}\n"
-                f"**V2 plan:** {'present' if plan else 'not generated'}"
+                f"**Loot plan:** {'generated' if plan else 'not generated'}"
             )
         await reply(interaction, text)
 
-    @group.command(name="plan", description="Generate the current neutral V2 weekly plan")
+    @group.command(name="plan", description="Generate the current weekly loot plan")
     @require_raid_leader(None)
     async def plan(self, interaction):
         await defer(interaction, ephemeral=True)
@@ -103,46 +138,26 @@ class Reclear(commands.Cog):
             result = generate_and_persist_weekly_plan(
                 session, week.static_id, week.id, interaction.user.id
             )
+            names = _presentation(session, result)[0]
+            static_name, reset_date = week.static.name, week.week_start
         await interaction.followup.send(
-            view=V2PlanView(self.bot, result, interaction.user.id), ephemeral=True
-        )
-
-    @group.command(name="complete", description="Record neutral floor completion")
-    @require_raid_leader(None)
-    async def complete(self, interaction, floor_number: int):
-        await defer(interaction, ephemeral=True)
-        if floor_number not in (1, 2, 3, 4):
-            raise ValueError("Floor number must be between 1 and 4.")
-        with command_session(self.bot) as session:
-            week = current_week(session, selected(session, interaction).id)
-            characters = [p.character for g in week.groups for p in g.participants] or [
-                c for m in week.static.members if m.active for c in m.characters if c.active
-            ]
-            for character in characters:
-                row = session.scalar(
-                    select(WeeklyLockout).where(
-                        WeeklyLockout.character_id == character.id,
-                        WeeklyLockout.floor_number == floor_number,
-                        WeeklyLockout.week_start == week.week_start,
-                    )
-                )
-                if row is None:
-                    row = WeeklyLockout(
-                        character_id=character.id,
-                        floor_number=floor_number,
-                        week_start=week.week_start,
-                    )
-                    session.add(row)
-                row.cleared = True
-                row.loot_eligible = False
-            session.flush()
-        await reply(
-            interaction,
-            f"Floor {floor_number} completion recorded for the neutral V2 week.",
+            view=V2PlanView(self.bot, result, interaction.user.id, names, static_name, reset_date),
             ephemeral=True,
         )
 
-    @group.command(name="resume", description="Resume at the first pending V2 confirmation")
+    @group.command(name="complete", description="Announce that this week's reclear is complete")
+    @require_raid_leader(None)
+    async def complete(self, interaction):
+        await defer(interaction, ephemeral=True)
+        with command_session(self.bot) as session:
+            week = current_week(session, selected(session, interaction).id)
+        await reply(
+            interaction,
+            f"Reclear complete for the week of {week.week_start}.",
+            ephemeral=True,
+        )
+
+    @group.command(name="resume", description="Resume at the first pending loot confirmation")
     async def resume(self, interaction):
         await defer(interaction, ephemeral=True)
         with command_session(self.bot) as session:
@@ -151,9 +166,9 @@ class Reclear(commands.Cog):
         if view:
             await interaction.followup.send(view=view, ephemeral=True)
         else:
-            await interaction.followup.send("No pending V2 confirmations remain.", ephemeral=True)
+            await interaction.followup.send("No pending loot confirmations remain.", ephemeral=True)
 
-    @group.command(name="close", description="Close a fully resolved V2 reclear")
+    @group.command(name="close", description="Close a fully resolved reclear")
     @require_raid_leader(None)
     async def close(self, interaction):
         await defer(interaction, ephemeral=True)
@@ -162,14 +177,14 @@ class Reclear(commands.Cog):
             if _next_confirmation(self.bot, session, week, interaction.user.id) is not None:
                 await reply(
                     interaction,
-                    "Closure blocked: V2 confirmation questions remain.",
+                    "Closure blocked: confirmation questions remain.",
                     ephemeral=True,
                 )
                 return
             close_v2_week(session, week, interaction.user.id)
-        await reply(interaction, "V2 reclear closed; audit history was retained.", ephemeral=True)
+        await reply(interaction, "Reclear closed; audit history was retained.", ephemeral=True)
 
-    @group.command(name="cancel", description="Cancel an untouched neutral reclear week")
+    @group.command(name="cancel", description="Cancel the current weekly loot plan")
     @require_raid_leader(None)
     async def cancel(self, interaction, reason: str):
         with command_session(self.bot) as session:
@@ -177,14 +192,19 @@ class Reclear(commands.Cog):
             week_id, static_id, start = week.id, week.static_id, week.week_start
 
         async def cancel_week(callback_interaction):
-            with command_session(self.bot) as session:
-                static = selected(session, callback_interaction)
-                if static.id != static_id:
-                    raise ValueError("This cancellation preview is stale.")
-                cancel_reclear_week(session, static.id, reason, callback_interaction.user.id)
-            await callback_interaction.response.edit_message(
-                content="Reclear cancelled; audit history was retained.", view=None
-            )
+            try:
+                with command_session(self.bot) as session:
+                    static = selected(session, callback_interaction)
+                    if static.id != static_id:
+                        raise ValueError("This cancellation preview is stale.")
+                    cancel_reclear_week(session, static.id, reason, callback_interaction.user.id)
+                await callback_interaction.response.edit_message(
+                    view=message_view("Reclear cancelled; audit history was retained.")
+                )
+            except ValueError as error:
+                await callback_interaction.response.edit_message(
+                    view=message_view(f"Reclear could not be cancelled: {error}")
+                )
 
         await interaction.response.send_message(
             view=ConfirmActionView(

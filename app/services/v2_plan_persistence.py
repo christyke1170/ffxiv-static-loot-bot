@@ -90,6 +90,8 @@ def load_persisted_plan_v2(session, plan_id: int) -> PersistedV2Plan:
             rows,
             unassigned,
             tuple(json.loads(plan.warnings_json)),
+            plan.reclear_week.static.name,
+            plan.reclear_week.week_start,
         )
     else:
         groups = []
@@ -135,6 +137,8 @@ def load_persisted_plan_v2(session, plan_id: int) -> PersistedV2Plan:
             tuple(json.loads(plan.warnings_json)),
             score,
             plan.partitions_evaluated,
+            plan.reclear_week.static.name,
+            plan.reclear_week.week_start,
         )
     return PersistedV2Plan(plan.id, proposal)
 

@@ -80,6 +80,8 @@ def generate_regular_plan_v2(state: PlanningState) -> RegularPlanProposal:
         tuple(assignments),
         tuple(unassigned),
         tuple(dict.fromkeys(warnings)),
+        state.static_name,
+        state.week_start,
     )
     fingerprint = sha256(repr(proposal_data).encode()).hexdigest()
     return RegularPlanProposal(
@@ -91,6 +93,8 @@ def generate_regular_plan_v2(state: PlanningState) -> RegularPlanProposal:
         tuple(assignments),
         tuple(unassigned),
         tuple(dict.fromkeys(warnings)),
+        state.static_name,
+        state.week_start,
     )
 
 

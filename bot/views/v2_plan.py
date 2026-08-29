@@ -2,17 +2,37 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import discord
 
 from app.models import ClearMode
 from bot.checks import is_raid_leader
 from bot.services.commands import selected
 
+RESOURCE_LABELS = {
+    "ACCESSORY_COFFER": "Accessory Coffer",
+    "HEAD_COFFER": "Head Coffer",
+    "BODY_COFFER": "Chest Coffer",
+    "CHEST_COFFER": "Chest Coffer",
+    "GLOVES_COFFER": "Gloves Coffer",
+    "BOOTS_COFFER": "Boots Coffer",
+    "PANTS_COFFER": "Pants Coffer",
+    "ARMOR_TWINE": "Armor Twine",
+    "ACCESSORY_GLAZE": "Accessory Glaze",
+    "WEAPON_TOMESTONE": "Weapon Tomestone",
+    "WEAPON_AUGMENT": "Weapon Augment",
+}
+
+
+def _resource(value) -> str:
+    return RESOURCE_LABELS.get(value, value.replace("_", " ").title() if value else "Resource")
+
 
 def _recipient(assignment, names: dict[int, str]) -> str:
     if assignment.recipient_id is None:
         return "Free-for-all (recipient required)"
-    return names.get(assignment.recipient_id, "Assigned recipient")
+    return names.get(assignment.recipient_id, "Unknown character")
 
 
 def _assignment_line(assignment, names: dict[int, str]) -> str:
@@ -26,18 +46,38 @@ def _assignment_line(assignment, names: dict[int, str]) -> str:
         or getattr(assignment, "loot_type", None)
         or getattr(assignment, "loot_key", "resource")
     )
+    resource = _resource(resource)
     if effects:
         resource += f" [{effects}]"
     return f"{resource}: {_recipient(assignment, names)}"
 
 
-def v2_plan_pages(result, names: dict[int, str] | None = None) -> list[str]:
+def _unassigned_line(row) -> str:
+    run = f"Run {'A' if row.group_number == 1 else 'B'}, " if hasattr(row, "group_number") else ""
+    resource = _resource(getattr(row, "loot_type", None) or getattr(row, "loot_key", "resource"))
+    return f"- {run}Floor {row.floor_number}: {resource} - {row.reason}"
+
+
+def v2_plan_pages(
+    result,
+    names: dict[int, str] | None = None,
+    static_name: str | None = None,
+    reset_date: date | None = None,
+) -> list[str]:
     """Render only neutral persisted-plan fields, split into Discord-sized pages."""
     names = names or {}
     proposal = result.proposal
+    static_name = static_name or getattr(proposal, "static_name", None)
+    display_date = reset_date or getattr(proposal, "week_start", None)
+    reset_text = (
+        display_date.strftime("%B %d, %Y").replace(" 0", " ")
+        if display_date
+        else "Date unavailable"
+    )
     lines = [
-        f"**V2 Weekly Plan - Static {proposal.static_id}**",
-        f"Week: {proposal.week_id} (week {proposal.week_number})",
+        f"**{'Split' if proposal.mode is ClearMode.SPLIT else 'Weekly'} Loot Plan - "
+        f"{static_name or 'Static'}**",
+        f"Reset week: {reset_text}",
         f"Mode: {proposal.mode.value.title()}",
         "",
     ]
@@ -45,7 +85,7 @@ def v2_plan_pages(result, names: dict[int, str] | None = None) -> list[str]:
     if proposal.mode is ClearMode.REGULAR:
         assignments = proposal.assignments
         roster = "\n".join(
-            f"- {names.get(row.recipient_id, str(row.recipient_id))} "
+            f"- {names.get(row.recipient_id, 'Unknown character')} "
             f"({row.recipient_job or 'Job unavailable'})"
             for row in assignments
             if row.recipient_id is not None
@@ -57,7 +97,7 @@ def v2_plan_pages(result, names: dict[int, str] | None = None) -> list[str]:
             pages.append(
                 f"**Run {'A' if group.group_number == 1 else 'B'} roster**\n"
                 + "\n".join(
-                    f"- {names.get(identifier, str(identifier))}"
+                    f"- {names.get(identifier, 'Unknown character')}"
                     for identifier in group.participant_ids
                 )
             )
@@ -89,31 +129,29 @@ def v2_plan_pages(result, names: dict[int, str] | None = None) -> list[str]:
     if unassigned:
         pages.append(
             "**Free-for-all / unassigned resources**\n"
-            + "\n".join(
-                f"- Floor {row.floor_number}: "
-                f"{getattr(row, 'loot_type', None) or getattr(row, 'loot_key', 'resource')} - "
-                f"{row.reason}"
-                for row in unassigned
-            )
+            + "\n".join(_unassigned_line(row) for row in unassigned)
         )
     if proposal.warnings:
         pages.append(
             "**Configuration warnings**\n"
             + "\n".join(f"- {warning}" for warning in proposal.warnings)
         )
-    return [page[:1990] for page in pages] or ["No V2 plan details are available."]
+    return [page[:1990] for page in pages] or ["No loot plan details are available."]
 
 
 class V2PlanView(discord.ui.LayoutView):
     """Owner/raid-leader restricted, unregistered V2 plan pager."""
 
-    def __init__(self, bot, result, owner_id: int):
+    def __init__(self, bot, result, owner_id: int, names=None, static_name=None, reset_date=None):
         super().__init__(timeout=300)
         self.bot = bot
         self.result = result
         self.owner_id = owner_id
+        self.names = names or {}
+        self.static_name = static_name
+        self.reset_date = reset_date
         self.page = 0
-        self.pages = v2_plan_pages(result)
+        self.pages = v2_plan_pages(result, self.names, self.static_name, self.reset_date)
         self._build()
 
     def _build(self):
@@ -149,7 +187,7 @@ class V2PlanView(discord.ui.LayoutView):
                     or static.guild.discord_guild_id != interaction.guild.id
                 ):
                     await interaction.response.send_message(
-                        "This V2 plan is not for the selected static.", ephemeral=True
+                        "This loot plan is not for the selected static.", ephemeral=True
                     )
                     return False
         except ValueError as error:
