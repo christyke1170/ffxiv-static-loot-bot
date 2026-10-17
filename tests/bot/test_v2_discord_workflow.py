@@ -181,3 +181,30 @@ def test_view_modules_do_not_import_legacy_plan_or_confirmation_services():
         assert "generate_weekly_loot_plan" not in names
         assert "confirm_loot_plan" not in names
         assert "load_persisted_loot_plan" not in names
+
+
+@pytest.mark.parametrize("received", [True, False])
+def test_resume_resolves_separate_tome_receipts_and_one_application(bot, received):
+    from sqlalchemy import select
+
+    from app.models import V2PlanAssignment
+    from app.services.v2_confirmation import confirm_v2_application, confirm_v2_receipt
+    from bot.commands.reclear import _next_confirmation
+    from tests.test_v2_confirmation import _paired
+
+    with bot.session_factory() as session:
+        static, week, plan, anchor = _paired(session)
+        session.commit()
+        pending = _next_confirmation(bot, session, week, 200)
+        assert pending.resource_key == "WEAPON_TOMESTONE"
+        confirm_v2_receipt(session, pending.assignment_id, pending.resource_key, received)
+        pending = _next_confirmation(bot, session, week, 200)
+        assert pending.resource_key == "WEAPON_AUGMENT"
+        assert pending.assignment_id != anchor.id
+        confirm_v2_receipt(session, pending.assignment_id, pending.resource_key, received)
+        pending = _next_confirmation(bot, session, week, 200)
+        if received:
+            assert pending.assignment_id == anchor.id
+            confirm_v2_application(session, pending.assignment_id, True)
+        assert _next_confirmation(bot, session, week, 200) is None
+        assert len(list(session.scalars(select(V2PlanAssignment)))) == 2

@@ -6,8 +6,9 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from app.models import V2Confirmation, V2PlanAssignment
+from app.models import V2PlanAssignment
 from app.services import correct_v2_application, correct_v2_receipt
+from app.services.v2_confirmation import read_v2_confirmation_state
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
 
@@ -43,19 +44,25 @@ class Loot(commands.Cog):
                 )
             else:
                 resource_key, action = "APPLICATION", "APPLICATION"
-            row = session.scalar(
-                select(V2Confirmation).where(
-                    V2Confirmation.assignment_id == assignment,
-                    V2Confirmation.resource_key == resource_key,
-                    V2Confirmation.action == action,
-                )
+            state = read_v2_confirmation_state(session, assignment)
+            row = next(
+                (
+                    row
+                    for row in state.confirmations
+                    if row.resource_key == resource_key and row.action == action
+                ),
+                None,
             )
             if row is None:
                 raise ValueError("No matching V2 confirmation exists for this assignment.")
             if action == "RECEIPT":
-                correct_v2_receipt(session, row.id, correct_answer, interaction.user.id, reason)
+                correct_v2_receipt(
+                    session, row.confirmation_id, correct_answer, interaction.user.id, reason
+                )
             else:
-                correct_v2_application(session, row.id, correct_answer, interaction.user.id, reason)
+                correct_v2_application(
+                    session, row.confirmation_id, correct_answer, interaction.user.id, reason
+                )
         await reply(interaction, "V2 correction recorded; history was retained.", ephemeral=True)
 
 

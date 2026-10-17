@@ -2,31 +2,10 @@
 
 from dataclasses import dataclass
 
+from app.domain.jobs import JOB_CATALOG
 from app.models import GearSlotCode, LootCategory
 
-REGULAR_JOB_PRIORITY: tuple[str, ...] = (
-    "SAM",
-    "VPR",
-    "BLM",
-    "RPR",
-    "MNK",
-    "DRG",
-    "NIN",
-    "PCT",
-    "SMN",
-    "RDM",
-    "MCH",
-    "DNC",
-    "BRD",
-    "WHM",
-    "SGE",
-    "AST",
-    "SCH",
-    "DRK",
-    "GNB",
-    "PLD",
-    "WAR",
-)
+REGULAR_JOB_PRIORITY: tuple[str, ...] = tuple(job.abbreviation for job in JOB_CATALOG)
 
 _JOB_RANKS = {job: rank for rank, job in enumerate(REGULAR_JOB_PRIORITY, 1)}
 UNKNOWN_JOB_PRIORITY = len(REGULAR_JOB_PRIORITY) + 1

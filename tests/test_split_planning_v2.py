@@ -104,7 +104,7 @@ def test_ownership_mismatch_is_rejected():
 
 def test_exact_comparison_key_is_lexicographic_and_canonical_last():
     score = SplitPartitionScore((1,), (2,), (3,), 4, (5,), 6, 7)
-    assert score.comparison_key == ((1,), (2,), (3,), 4, (5,), 6, -7)
+    assert score.comparison_key == ((1,), (2,), 4, (5,), 6, 0, -7)
 
 
 def test_split_output_is_deterministic_and_read_only():
@@ -143,18 +143,18 @@ def test_material_quality_final_tie_break_is_canonical_order():
     assert second.comparison_key < first.comparison_key
 
 
-def test_completed_dps_separation_is_after_main_and_material_components():
+def test_completed_dps_separation_metadata_no_longer_changes_group_priority():
     better = SplitPartitionScore((1,), (1,), (2,), 0, (), 0, 1)
-    worse = SplitPartitionScore((1,), (1,), (1,), 0, (), 0, 2)
-    assert better.comparison_key > worse.comparison_key
+    worse = SplitPartitionScore((1,), (1,), (1,), 0, (), 0, 1)
+    assert better.comparison_key == worse.comparison_key
     earlier = SplitPartitionScore((2,), (0,), (0,), 0, (), 0, 99)
     assert earlier.comparison_key > better.comparison_key
 
 
-def test_useful_alt_savage_is_after_completed_dps_separation():
-    better_alt = SplitPartitionScore((1,), (1,), (1,), 1, (1,), 0, 1)
-    better_dps = SplitPartitionScore((1,), (1,), (2,), 0, (), 0, 2)
-    assert better_dps.comparison_key > better_alt.comparison_key
+def test_useful_alt_savage_outranks_soft_role_balance_after_main_outcomes_match():
+    better_alt = SplitPartitionScore((1,), (1,), (), 1, (1,), 0, 1, main_role_balance=-4)
+    balanced_roles = SplitPartitionScore((1,), (1,), (), 0, (), 0, 2, main_role_balance=0)
+    assert better_alt.comparison_key > balanced_roles.comparison_key
 
 
 def test_useful_paired_tome_opportunity_is_scored_after_alt_components():

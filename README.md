@@ -70,8 +70,21 @@ WAL, and a busy timeout but is a one-process deployment only.
   2 Healers, and 4 DPS.
 - Persisted hierarchy order is the planning priority.
 - Savage coffers are Main-first. Glaze and Twine are Main-only grants.
+- Savage coffers follow greedy hierarchy without receipt-history or per-week
+  assignment penalties. Split group selection maximizes Main allocations in
+  hierarchy order before material fairness and any Alt benefits.
+- A two-DPS/one-Healer/one-Tank Main mix is a preference, never a restriction
+  ahead of useful allocations. Every Split run still has four Mains/four Alts,
+  and each owned pair is in opposite runs.
+- In both modes, Glaze/Twine use combined material receipt fairness, then
+  remaining need, then hierarchy. Earlier proposed material grants count toward
+  fairness. Materials without an eligible Main remain unassigned.
 - Paired Alt weapon Tome upgrades require and consume both
   `WEAPON_TOMESTONE` and `WEAPON_AUGMENT`.
+- Tome weapon resources never go to Mains. Alts already wearing or proposed to
+  receive a Savage Weapon are excluded from this weapon upgrade opportunity.
+- Floor 4's random weapon is updated manually in current gear and never enters
+  the planned drop list. A newly generated plan reads those updated categories.
 - Books are informational only and never affect proposals.
 - `/reclear setup` creates only a DRAFT week; an administrator runs
   `/reclear plan` to generate the V2 plan.
@@ -95,6 +108,30 @@ Other retained groups manage Statics, members, characters, category-only BiS,
 hierarchy, current gear, neutral resources, needs, gearboard, and V2 loot
 corrections. There is no `/tier`, `/bis import`, legacy planner, legacy plan,
 legacy confirmation, or manual Split-group selection command.
+
+Use `/bis setup` for initial setup across every supported job, including jobs
+outside the current roster. The private overview shows configured/missing sets.
+Select a job, select multiple slots and a category, then apply that category to
+the draft. Review the slot list and Save. Individual slot editing remains
+available through `/bis set` or the batch editor's Individual slots button.
+Dropdown selections stay in the draft without refreshing the full message.
+
+The overview's Copy saved BiS flow copies one saved set to selected jobs only
+after Review and Save copy. Existing destination sets are replaced. Offhand
+becomes N/A for jobs without one; an N/A source Offhand uses the source Weapon
+category when copying to PLD. Review the result for each job's actual BiS.
+
+After a leader adds members, each member can run `/character setup` to select a
+shared job and enter Main/Alt names and worlds in one form. Save pair confirms
+both characters together. Leaders can specify `member` to register another
+member's pair. Existing matching characters and gear are preserved; use
+`/character edit` for corrections. Cancel writes nothing.
+
+Combat jobs are maintained only in `app/domain/jobs.py`, in default priority
+order. Add future jobs there and run `/setup seed`; there is no Discord job
+catalog editor. Seeding preserves saved BiS and hierarchy configurations.
+Existing Statics can place newly added jobs using `/hierarchy set`. Job setup
+menus paginate as the catalog grows.
 
 ## V2 confirmation workflow
 

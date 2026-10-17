@@ -17,6 +17,13 @@ from app.schemas.split_planning_v2 import (
     SplitScore,
     UnassignedSplitLoot,
 )
+from app.services.loot_allocation import (
+    floor_eligible,
+    hierarchy_key,
+    hierarchy_position,
+    material_priority,
+    savage_need,
+)
 
 
 def generate_split_plan_v2(state: PlanningState) -> SplitPlanProposal:
@@ -30,6 +37,9 @@ def generate_split_plan_v2(state: PlanningState) -> SplitPlanProposal:
     ownership = {main: alt for main, alt in state.ownership}
     reverse_ownership = {alt: main for main, alt in state.ownership}
     warnings.extend(_validate_roster(state, characters, ownership, reverse_ownership))
+    for character in characters.values():
+        if character.needs:
+            warnings.extend(character.needs.configuration_warnings)
     _validate_saved_groups(state, characters)
     mains = tuple(sorted(state.mains, key=lambda row: row.character_id))
     candidates = []
@@ -175,125 +185,106 @@ def _label_group(state, number):
 
 
 def _partition_score(state, groups, ordinal):
-    hierarchy = {job_id: position for job_id, _, position in state.hierarchy}
-    width = max(hierarchy.values(), default=0) + 1
     assignments = tuple(row for group in groups for row in group.assignments)
     savage = tuple(
         row for row in assignments if row.gear_effects and row.loot_key.endswith("COFFER")
     )
 
-    def vector(kind):
+    def vector(characters):
         return tuple(
-            sum(row.recipient_kind is kind and row.hierarchy_position == position for row in savage)
-            for position in range(1, width)
+            sum(row.recipient_id == character.character_id for row in savage)
+            for character in sorted(characters, key=lambda row: hierarchy_key(state, row))
         )
 
-    alt_vector = vector(CharacterKind.ALT)
+    alt_vector = vector(state.alts)
+    characters = {row.character_id: row for row in (*state.mains, *state.alts)}
+    balance = -sum(
+        abs(
+            sum(
+                characters[identifier].kind is CharacterKind.MAIN
+                and characters[identifier].combat_role == role
+                for identifier in group.participant_ids
+            )
+            - ideal
+        )
+        for group in groups
+        for role, ideal in (("DPS", 2), ("TANK", 1), ("HEALER", 1))
+    )
     return SplitPartitionScore(
-        vector(CharacterKind.MAIN),
+        vector(state.mains),
         _material_quality(assignments),
-        _completed_dps_separation(state, groups, hierarchy),
+        (),
         sum(alt_vector),
         alt_vector,
-        sum(
-            row.loot_key == "WEAPON_TOMESTONE" and row.recipient_id is not None
-            for row in assignments
-        ),
+        sum(row.loot_key == "WEAPON_TOMESTONE" for row in assignments),
         ordinal,
+        main_role_balance=balance,
     )
 
 
 def _material_quality(assignments):
-    result = []
+    # Compare actual Main outcomes, independent of the arbitrary Run A/B labels.
+    quality = []
     for material in ("ARMOR_TWINE", "ACCESSORY_GLAZE"):
-        rows = sorted(
-            (row for row in assignments if row.material_key == material),
-            key=lambda row: row.group_number,
+        scores = sorted(
+            (row.score for row in assignments if row.material_key == material),
+            key=lambda score: score.comparison_key,
         )
-        result.append(sum(row.recipient_id is not None for row in rows))
-        for row in rows:
-            score = row.score
-            result.extend(
-                (0, 0, 0, 0, 0, 0)
-                if score is None
-                else (
+        quality.append(len(scores))
+        for score in scores:
+            quality.extend(
+                (
                     -score.combined_fairness_count,
                     score.remaining_need,
                     -score.hierarchy_position,
                     -score.fairness_count,
-                    -score.member_id,
-                    -score.character_id,
                 )
             )
-    return tuple(result)
-
-
-def _completed_dps_separation(state, groups, hierarchy):
-    run_by_id = {
-        character_id: group.group_number
-        for group in groups
-        for character_id in group.participant_ids
-    }
-    effects = {
-        (row.recipient_id, effect.slot_key)
-        for group in groups
-        for row in group.assignments
-        if row.recipient_kind is CharacterKind.MAIN
-        for effect in row.gear_effects
-        if effect.resulting_category is GearClassification.SAVAGE
-    }
-    completed = []
-    for character in state.mains:
-        if character.combat_role != "DPS":
-            continue
-        incomplete = {
-            row.gear_slot
-            for row in character.needs.slot_results
-            if row.desired is GearClassification.SAVAGE
-            and row.status
-            in {NeedsV2Status.NEEDS_SAVAGE_DROP, NeedsV2Status.OWNED_COFFER_AVAILABLE}
-        }
-        if all((character.character_id, slot) in effects for slot in incomplete):
-            completed.append(character)
-    completed.sort(
-        key=lambda row: (hierarchy.get(row.job_id, 10_000), row.member_id, row.character_id)
-    )
-    if not completed:
-        return ()
-    first_run = run_by_id[completed[0].character_id]
-    return tuple(int(run_by_id[row.character_id] != first_run) for row in completed[1:])
+    return tuple(quality)
 
 
 def _plan_group(state, group_id, group_number, participants, ownership, reverse_ownership):
-    used: set[tuple[int, GearSlotCode]] = set()
-    assignments: list[SplitAssignment] = []
-    missing: list[UnassignedSplitLoot] = []
+    used, planned = set(), {}
+    assignments, missing = [], []
     for drop in loot_rules.REGULAR_DROPS:
-        candidates = _candidates(state, participants, drop, used, ownership, reverse_ownership)
-        if not candidates:
-            if drop.material_type is not None:
-                assignments.append(
-                    SplitAssignment(
-                        group_id,
-                        group_number,
-                        drop.floor,
-                        drop.loot_type,
-                        None,
-                        drop.material_type,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        0,
-                        0,
-                        (),
-                        1,
-                        None,
-                        "No Main needs this material; free-for-all.",
-                    )
-                )
+        candidates = []
+        for character in participants:
+            if character.needs is None or not floor_eligible(
+                state, character.character_id, drop.floor
+            ):
                 continue
+            if drop.material_type:
+                if character.kind is not CharacterKind.MAIN:
+                    continue
+                priority = material_priority(state, character, drop.material_type, planned)
+                if priority is None:
+                    continue
+                combined, negative_need, position, specific, _, _ = priority
+                primary, effects = None, ()
+            else:
+                need = savage_need(character, drop, used)
+                if need is None:
+                    continue
+                primary, effects = need
+                combined, negative_need, specific = 0, 0, 0
+                position = hierarchy_position(state, character)
+            score = SplitScore(
+                0 if character.kind is CharacterKind.MAIN else 1,
+                position,
+                0,
+                specific,
+                character.member_id,
+                character.character_id,
+                -negative_need,
+                combined,
+            )
+            candidates.append((score, character, primary, effects))
+        if not candidates:
+            reason = (
+                "No eligible Main needs this material; Main-only, left unassigned."
+                if drop.material_type
+                else "No participating Main or Alt needs this for job BiS; free-for-all."
+            )
             missing.append(
                 UnassignedSplitLoot(
                     group_id,
@@ -302,17 +293,21 @@ def _plan_group(state, group_id, group_number, participants, ownership, reverse_
                     drop.loot_type,
                     drop.slot,
                     drop.material_type,
-                    "No participating character has a matching incomplete need.",
+                    reason,
                 )
             )
             continue
-        character, score, primary_slot, effects, fairness = min(
-            candidates, key=lambda row: row[1].comparison_key
-        )
+        score, character, primary, effects = min(candidates, key=lambda row: row[0].comparison_key)
         owner_alt = (
             ownership.get(character.character_id)
             if character.kind is CharacterKind.MAIN
             else reverse_ownership.get(character.character_id)
+        )
+        reason = (
+            "Main-only material: combined receipts, remaining need, then hierarchy."
+            if drop.material_type
+            else f"Greedy {character.kind.value.title()} BiS allocation; "
+            f"hierarchy {score.hierarchy_position}."
         )
         assignments.append(
             SplitAssignment(
@@ -320,182 +315,87 @@ def _plan_group(state, group_id, group_number, participants, ownership, reverse_
                 group_number,
                 drop.floor,
                 drop.loot_type,
-                primary_slot,
+                primary,
                 drop.material_type,
                 character.character_id,
                 character.job_abbreviation,
                 character.kind,
                 owner_alt,
-                character.hierarchy_position,
-                score.assignments_in_proposal,
-                fairness,
+                score.hierarchy_position,
+                0,
+                score.fairness_count,
                 effects,
-                1 if drop.material_type else 0,
+                1,
                 score,
-                f"Assigned to {character.kind.value.title()} {character.job_abbreviation}; "
-                f"hierarchy {score.hierarchy_position}, fairness {fairness}.",
+                reason,
             )
         )
-        if primary_slot is not None:
-            used.add((character.character_id, primary_slot))
-    tome = _plan_tome_resources(state, group_id, group_number, participants)
-    if tome is not None:
-        assignments.extend(tome)
+        used.update((character.character_id, effect.slot_key) for effect in effects)
+        if drop.material_type:
+            key = character.character_id, drop.material_type
+            planned[key] = planned.get(key, 0) + 1
+    tome, unavailable = _plan_tome_resources(state, group_id, group_number, participants, used)
+    assignments.extend(tome)
+    missing.extend(unavailable)
     return tuple(assignments), tuple(missing)
 
 
-def _plan_tome_resources(state, group_id, group_number, participants):
+def _plan_tome_resources(state, group_id, group_number, participants, used):
     eligible = []
-    hierarchy = {job_id: position for job_id, _, position in state.hierarchy}
     for character in participants:
-        if character.kind is not CharacterKind.ALT or not _floor_eligible(
-            state, character.character_id, 3
+        if (
+            character.kind is not CharacterKind.ALT
+            or not floor_eligible(state, character.character_id, 3)
+            or (character.character_id, GearSlotCode.WEAPON) in used
         ):
             continue
         weapon = next(
             (row for row in character.needs.slot_results if row.gear_slot is GearSlotCode.WEAPON),
             None,
         )
-        if weapon is not None and weapon.current is not GearClassification.AUGMENTED_TOME:
+        if (
+            weapon is not None
+            and weapon.current not in {GearClassification.SAVAGE, GearClassification.AUGMENTED_TOME}
+            and weapon.status is not NeedsV2Status.MANUALLY_COMPLETE
+        ):
             eligible.append(character)
-    recipient = min(
-        eligible,
-        key=lambda row: (hierarchy.get(row.job_id, 10_000), row.member_id, row.character_id),
-        default=None,
-    )
-    effects = ()
-    if recipient is not None:
-        effects = (ProposedGearEffect(GearSlotCode.WEAPON, GearClassification.AUGMENTED_TOME),)
-        if recipient.uses_offhand:
-            effects += (
-                ProposedGearEffect(GearSlotCode.OFFHAND, GearClassification.AUGMENTED_TOME),
-            )
-    common = dict(
-        group_id=group_id,
-        group_number=group_number,
-        floor_number=3,
-        primary_slot=GearSlotCode.WEAPON,
-        material_key=None,
-        recipient_id=recipient.character_id if recipient else None,
-        recipient_job=recipient.job_abbreviation if recipient else None,
-        recipient_kind=recipient.kind if recipient else None,
-        owned_alt_id=None,
-        hierarchy_position=hierarchy.get(recipient.job_id) if recipient else None,
-        assignments_in_proposal=0,
-        fairness_count=0,
-        gear_effects=effects,
-        resource_quantity=1,
-        score=None,
-        reason=(
-            "Paired Tome opportunity; "
-            + (
-                "free-for-all."
-                if recipient is None
-                else "assigned to the highest-priority eligible Alt."
-            )
-        ),
-    )
-    return (
-        SplitAssignment(loot_key="WEAPON_TOMESTONE", **common),
-        SplitAssignment(loot_key="WEAPON_AUGMENT", **common),
-    )
-
-
-def _candidates(state, participants, drop, used, ownership, reverse_ownership):
-    result = []
-    for character in participants:
-        if drop.material_type is not None and character.kind is CharacterKind.ALT:
-            continue
-        if not _floor_eligible(state, character.character_id, drop.floor):
-            continue
-        needs = character.needs
-        if needs is None:
-            continue
-        if drop.slot is None:
-            rows = [
-                row
-                for row in needs.slot_results
-                if row.desired is GearClassification.AUGMENTED_TOME
-                and row.status in {NeedsV2Status.NEEDS_BASE_TOME, NeedsV2Status.NEEDS_AUGMENTATION}
-                and row.slot_name in _material_slots(needs, drop.material_type)
-            ]
-            required = next(
-                (row for row in needs.material_needs if row.material_code == drop.material_type),
+    recipient = min(eligible, key=lambda row: hierarchy_key(state, row), default=None)
+    keys = ("WEAPON_TOMESTONE", "WEAPON_AUGMENT")
+    if recipient is None:
+        return (), tuple(
+            UnassignedSplitLoot(
+                group_id,
+                group_number,
+                3,
+                key,
+                GearSlotCode.WEAPON,
                 None,
+                "No eligible Alt needs a weapon upgrade; Alt-only, left unassigned.",
             )
-            if required is None or required.additional_needed <= 0 or not rows:
-                continue
-            primary_slot = None
-            effects = ()
-            fairness = _fairness(state, character.character_id, drop.material_type)
-            combined_fairness = _combined_material_fairness(state, character.character_id)
-            remaining_need = required.additional_needed
-        else:
-            eligible_slots = (
-                (drop.slot, GearSlotCode.OFFHAND)
-                if drop.slot is GearSlotCode.WEAPON and character.uses_offhand
-                else (drop.slot,)
-            )
-            rows = [
-                row
-                for row in needs.slot_results
-                if row.gear_slot in eligible_slots
-                and row.desired is GearClassification.SAVAGE
-                and row.status
-                in {NeedsV2Status.NEEDS_SAVAGE_DROP, NeedsV2Status.OWNED_COFFER_AVAILABLE}
-            ]
-            if not rows or any((character.character_id, row.gear_slot) in used for row in rows):
-                continue
-            primary_slot = min(rows, key=lambda row: row.sort_order).gear_slot
-            effects = tuple(
-                ProposedGearEffect(slot, GearClassification.SAVAGE)
-                for slot in (
-                    (GearSlotCode.WEAPON, GearSlotCode.OFFHAND)
-                    if drop.slot is GearSlotCode.WEAPON and character.uses_offhand
-                    else (drop.slot,)
-                )
-            )
-            fairness = 0
-            combined_fairness = 0
-            remaining_need = 0
-        hierarchy = (
-            character.hierarchy_position or max((row[2] for row in state.hierarchy), default=0) + 1
+            for key in keys
         )
-        score = SplitScore(
-            0 if character.kind is CharacterKind.MAIN else 1,
-            hierarchy,
+    effects = (ProposedGearEffect(GearSlotCode.WEAPON, GearClassification.AUGMENTED_TOME),)
+    if recipient.uses_offhand:
+        effects += (ProposedGearEffect(GearSlotCode.OFFHAND, GearClassification.AUGMENTED_TOME),)
+    return tuple(
+        SplitAssignment(
+            group_id,
+            group_number,
+            3,
+            key,
+            GearSlotCode.WEAPON,
+            None,
+            recipient.character_id,
+            recipient.job_abbreviation,
+            recipient.kind,
+            None,
+            hierarchy_position(state, recipient),
             0,
-            fairness,
-            character.member_id,
-            character.character_id,
-            remaining_need,
-            combined_fairness,
+            0,
+            effects if key == "WEAPON_TOMESTONE" else (),
+            1,
+            None,
+            "Paired weapon upgrade for the highest-priority eligible Alt.",
         )
-        result.append((character, score, primary_slot, effects, fairness))
-    return result
-
-
-def _material_slots(needs, material):
-    required = next((row for row in needs.material_needs if row.material_code == material), None)
-    return required.slot_names if required else ()
-
-
-def _fairness(state, character_id, material):
-    row = next((item for item in state.fairness if item.character_id == character_id), None)
-    if row is None:
-        return 0
-    return row.savage_receipts if material is None else dict(row.material_grants).get(material, 0)
-
-
-def _combined_material_fairness(state, character_id):
-    row = next((item for item in state.fairness if item.character_id == character_id), None)
-    return 0 if row is None else sum(dict(row.material_grants).values())
-
-
-def _floor_eligible(state, character_id, floor_number):
-    rows = [
-        row
-        for row in state.lockouts
-        if row.character_id == character_id and row.floor_number == floor_number
-    ]
-    return not rows or all(row.loot_eligible and not row.cleared for row in rows)
+        for key in keys
+    ), ()

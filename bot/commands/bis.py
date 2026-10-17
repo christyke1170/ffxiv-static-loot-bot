@@ -6,6 +6,7 @@ from bot.checks import require_raid_leader
 from bot.services.bis import resolve_job, summarize_bis
 from bot.services.commands import command_session, defer, reply, selected
 from bot.views.bis import BisClearView, BisEditorView
+from bot.views.bis_setup import BisSetupView
 
 
 class Bis(commands.Cog):
@@ -13,6 +14,17 @@ class Bis(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
+    @group.command(
+        name="setup", description="Configure BiS for all jobs with batch editing and copies"
+    )
+    @require_raid_leader(None)
+    async def setup_jobs(self, interaction):
+        await defer(interaction, ephemeral=True)
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            view = BisSetupView(self.bot, static.id, interaction.user.id, interaction.guild.id)
+        await interaction.followup.send(view=view, ephemeral=True)
 
     @group.command(name="set", description="Configure category-only BiS for a job")
     @require_raid_leader(None)

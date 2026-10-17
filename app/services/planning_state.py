@@ -177,7 +177,9 @@ def _fairness(session, character_ids):
     corrections = {
         row.confirmation_id: row.corrected_success
         for row in session.scalars(
-            select(V2Correction).where(V2Correction.correction_type == "RECEIPT_OUTCOME")
+            select(V2Correction)
+            .where(V2Correction.correction_type == "RECEIPT_OUTCOME")
+            .order_by(V2Correction.id)
         )
     }
     savage = {character_id: 0 for character_id in character_ids}

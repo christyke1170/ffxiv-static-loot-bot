@@ -223,6 +223,12 @@ def _result(state, rows, warnings):
         if (
             row.desired is GearClassification.AUGMENTED_TOME
             and row.required_material_type_id is not None
+            and row.status
+            in {
+                NeedsV2Status.NEEDS_BASE_TOME,
+                NeedsV2Status.NEEDS_AUGMENTATION,
+                NeedsV2Status.READY_TO_AUGMENT,
+            }
         ):
             materials[row.required_material_type_id].append(row)
         if row.coffer_allocated and row.required_loot_type_code:
@@ -262,7 +268,7 @@ def _result(state, rows, warnings):
                 len(group),
                 dict(state.material_quantities).get(mid, 0),
                 sum(row.material_available for row in group),
-                max(0, len(group) - sum(row.material_available for row in group)),
+                max(0, len(group) - dict(state.material_quantities).get(mid, 0)),
                 tuple(row.slot_name for row in group),
             )
             for mid, group in sorted(materials.items())

@@ -2,6 +2,7 @@
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.models import Character, Static, V2ResourceBalance
 
@@ -40,7 +41,9 @@ def current_balance(
 ) -> V2ResourceBalance | None:
     key = validate_resource_key(resource_key)
     return session.scalar(
-        select(V2ResourceBalance).where(
+        select(V2ResourceBalance)
+        .execution_options(populate_existing=True)
+        .where(
             V2ResourceBalance.static_id == static_id,
             V2ResourceBalance.recipient_id == recipient_id,
             V2ResourceBalance.resource_key == key,
@@ -75,7 +78,8 @@ def adjust_current_balance(
     key = validate_resource_key(resource_key)
     if not isinstance(delta, int) or isinstance(delta, bool):
         raise ValueError("Neutral resource balance changes must be whole numbers.")
-    if session.get_bind().dialect.name == "postgresql":
+    dialect = session.get_bind().dialect.name
+    if dialect in {"postgresql", "sqlite"}:
         if delta < 0:
             result = session.execute(
                 update(V2ResourceBalance)
@@ -90,14 +94,20 @@ def adjust_current_balance(
             if result.rowcount != 1:
                 raise ValueError(f"Neutral {key} balance cannot become negative.")
         else:
+            insert = postgresql_insert if dialect == "postgresql" else sqlite_insert
+            conflict_scope = (
+                {"index_where": V2ResourceBalance.static_id.is_not(None)}
+                if dialect == "postgresql"
+                else {}
+            )
             session.execute(
-                postgresql_insert(V2ResourceBalance)
+                insert(V2ResourceBalance)
                 .values(
                     static_id=static_id, recipient_id=recipient_id, resource_key=key, quantity=0
                 )
                 .on_conflict_do_nothing(
                     index_elements=["static_id", "recipient_id", "resource_key"],
-                    index_where=V2ResourceBalance.static_id.is_not(None),
+                    **conflict_scope,
                 )
             )
             session.execute(

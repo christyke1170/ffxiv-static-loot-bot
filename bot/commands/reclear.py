@@ -13,6 +13,7 @@ from app.services.reclear import (
     current_week,
     setup_roster,
 )
+from app.services.v2_confirmation import requires_v2_application
 from bot.checks import require_raid_leader
 from bot.services.commands import command_session, defer, reply, selected
 from bot.views.reclear import ConfirmActionView, SetupPreviewView, message_view, roster_text
@@ -63,16 +64,15 @@ def _next_confirmation(bot, session, week, owner_id):
     plan = _plan(session, week.id)
     if plan is None:
         return None
-    for assignment in session.scalars(
-        select(V2PlanAssignment)
-        .where(V2PlanAssignment.plan_id == plan.id)
-        .order_by(V2PlanAssignment.sort_order)
-    ):
-        keys = (
-            ("WEAPON_TOMESTONE", "WEAPON_AUGMENT")
-            if "TOME" in assignment.loot_key.upper()
-            else (assignment.material_key or assignment.loot_key,)
+    assignments = list(
+        session.scalars(
+            select(V2PlanAssignment)
+            .where(V2PlanAssignment.plan_id == plan.id)
+            .order_by(V2PlanAssignment.run_id, V2PlanAssignment.sort_order, V2PlanAssignment.id)
         )
+    )
+    for assignment in assignments:
+        keys = (assignment.material_key or assignment.loot_key,)
         confirmations = {
             (row.resource_key, row.action)
             for row in session.scalars(
@@ -84,9 +84,12 @@ def _next_confirmation(bot, session, week, owner_id):
                 return V2ConfirmationView.for_resource(
                     bot, assignment.id, week.static_id, owner_id, key
                 )
-        if assignment.material_key is None and ("APPLICATION", "APPLICATION") not in confirmations:
+        if (
+            requires_v2_application(session, assignment)
+            and ("APPLICATION", "APPLICATION") not in confirmations
+        ):
             return V2ConfirmationView.for_resource(
-                bot, assignment.id, week.static_id, owner_id, keys[0]
+                bot, assignment.id, week.static_id, owner_id, assignment.loot_key
             )
     return None
 

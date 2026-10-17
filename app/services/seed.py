@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.jobs import JOB_CATALOG
 from app.models import GearSlot, GearSlotCode, Job
 from app.services.hierarchy import bootstrap_default_hierarchies
 
@@ -22,25 +23,10 @@ GEAR_SLOTS = [
 ]
 
 JOBS = {
-    "Tank": [("PLD", "Paladin"), ("WAR", "Warrior"), ("DRK", "Dark Knight"), ("GNB", "Gunbreaker")],
-    "Healer": [("WHM", "White Mage"), ("SCH", "Scholar"), ("AST", "Astrologian"), ("SGE", "Sage")],
-    "Melee DPS": [
-        ("MNK", "Monk"),
-        ("DRG", "Dragoon"),
-        ("NIN", "Ninja"),
-        ("SAM", "Samurai"),
-        ("RPR", "Reaper"),
-        ("VPR", "Viper"),
-    ],
-    "Physical Ranged DPS": [("BRD", "Bard"), ("MCH", "Machinist"), ("DNC", "Dancer")],
-    "Magical Ranged DPS": [
-        ("BLM", "Black Mage"),
-        ("SMN", "Summoner"),
-        ("RDM", "Red Mage"),
-        ("PCT", "Pictomancer"),
-    ],
+    role: [(job.abbreviation, job.name) for job in JOB_CATALOG if job.role == role]
+    for role in dict.fromkeys(job.role for job in JOB_CATALOG)
 }
-OFFHAND_CAPABILITY = {"PLD": True}
+OFFHAND_CAPABILITY = {job.abbreviation: job.uses_offhand for job in JOB_CATALOG}
 
 
 @dataclass(frozen=True, slots=True)

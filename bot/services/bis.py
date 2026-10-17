@@ -61,9 +61,14 @@ def load_bis(session: Session, static_id: int, job_id: int) -> BisSet | None:
 
 
 def validate_categories(
-    session: Session, job: Job, categories: dict[GearSlotCode, GearClassification]
+    session: Session,
+    job: Job,
+    categories: dict[GearSlotCode, GearClassification],
+    *,
+    slots: list[GearSlot] | None = None,
 ) -> list[GearSlot]:
-    slots = list(session.scalars(select(GearSlot).order_by(GearSlot.sort_order)))
+    if slots is None:
+        slots = list(session.scalars(select(GearSlot).order_by(GearSlot.sort_order)))
     expected = {slot.code for slot in slots}
     if set(categories) != expected:
         missing = sorted(expected - set(categories), key=lambda code: code.value)

@@ -36,21 +36,23 @@ class SplitPartitionScore:
 
     main_savage_vector: tuple[int, ...]
     material_quality: tuple[int, ...]
+    # Retained solely for immutable historical score readback; no longer compared.
     completed_dps_separation: tuple[int, ...]
     useful_alt_savage_count: int
     alt_savage_vector: tuple[int, ...]
     useful_tome_weapon_upgrades: int
     canonical_partition_order: int
+    main_role_balance: int = 0
 
     @property
     def comparison_key(self) -> tuple[object, ...]:
         return (
             self.main_savage_vector,
             self.material_quality,
-            self.completed_dps_separation,
             self.useful_alt_savage_count,
             self.alt_savage_vector,
             self.useful_tome_weapon_upgrades,
+            self.main_role_balance,
             -self.canonical_partition_order,
         )
 

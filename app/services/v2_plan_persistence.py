@@ -296,6 +296,19 @@ def _validate_proposal_state(state, proposal, mode):
     state_ids = {row.character_id for row in (*state.mains, *state.alts)}
     if not assigned_ids <= state_ids:
         raise V2PlanPersistenceError("Proposal recipient is outside the planning state.")
+    characters = {row.character_id: row for row in (*state.mains, *state.alts)}
+    rows = (
+        proposal.assignments
+        if mode is ClearMode.REGULAR
+        else tuple(row for group in proposal.groups for row in group.assignments)
+    )
+    for row in rows:
+        key = row.loot_type if mode is ClearMode.REGULAR else row.loot_key
+        kind = characters[row.recipient_id].kind if row.recipient_id in characters else None
+        if key in {"ACCESSORY_GLAZE", "ARMOR_TWINE"} and kind is not CharacterKind.MAIN:
+            raise V2PlanPersistenceError("Glaze and Twine require a Main recipient.")
+        if key in {"WEAPON_TOMESTONE", "WEAPON_AUGMENT"} and kind is not CharacterKind.ALT:
+            raise V2PlanPersistenceError("Weapon Tome resources require an Alt recipient.")
 
 
 def _add_assignment(session, plan, run, row, index):
@@ -409,5 +422,8 @@ def _score_from_json(value):
             tuple(data["alt_savage_vector"]),
             data["useful_tome_weapon_upgrades"],
             data["canonical_partition_order"],
+            main_role_balance=data.get("main_role_balance", 0),
         )
+    if "material_priority" in data:
+        data["material_priority"] = tuple(data["material_priority"])
     return SplitScore(**data) if "designation_priority" in data else RegularScore(**data)

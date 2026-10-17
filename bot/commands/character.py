@@ -14,6 +14,7 @@ from bot.services.admin import (
     set_character_active,
 )
 from bot.services.commands import command_session, defer, pages, reply, selected
+from bot.views.character_setup import CharacterSetupView
 from bot.views.deletion import DeleteConfirmationView
 
 
@@ -22,6 +23,25 @@ class Character(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
+    @group.command(name="setup", description="Register your Main and Alt together")
+    async def setup_pair(self, interaction, member: discord.Member | None = None):
+        await defer(interaction, ephemeral=True)
+        target_id = member.id if member is not None else interaction.user.id
+        if target_id != interaction.user.id and not is_raid_leader(interaction, None):
+            raise ValueError("Raid-leader permission is required to register for another member.")
+        with command_session(self.bot) as session:
+            static = selected(session, interaction)
+            target = next(
+                (row for row in static.members if row.active and row.discord_user_id == target_id),
+                None,
+            )
+            if target is None:
+                raise ValueError("The selected Discord user must be an active static member.")
+            view = CharacterSetupView(
+                self.bot, static.id, target.id, interaction.user.id, interaction.guild.id
+            )
+        await interaction.followup.send(view=view, ephemeral=True)
 
     @group.command(name="add")
     async def add(self, interaction, name: str, world: str, kind: str, job: str):

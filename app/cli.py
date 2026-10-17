@@ -12,6 +12,7 @@ from sqlalchemy.engine import make_url
 
 from app.config import Settings, get_settings
 from app.database import create_database_engine, create_session_factory
+from app.domain.jobs import JOB_CATALOG
 from app.models import GearSlot, Job, Static
 from app.services.hierarchy import bootstrap_default_hierarchies
 from bot.services.migrations import verify_migration_head
@@ -108,7 +109,7 @@ def validate_installation(settings: Settings | None = None) -> list[str]:
         with create_session_factory(engine)() as session:
             jobs = session.scalar(select(func.count()).select_from(Job)) or 0
             slots = session.scalar(select(func.count()).select_from(GearSlot)) or 0
-            if jobs < 21 or slots < 12:
+            if jobs < len(JOB_CATALOG) or slots < 12:
                 raise ValueError("Seed records are missing; run `/setup seed`.")
             messages.append(f"Seed records: valid ({jobs} jobs, {slots} slots)")
             statics = list(session.scalars(select(Static).where(Static.active.is_(True))))

@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 
 from app.models import (
     CharacterGearSlot,
+    CharacterKind,
     ClearMode,
     GearClassification,
     V2Confirmation,
@@ -92,9 +93,36 @@ def _assignment(session, loot_key="HEAD_COFFER"):
 
 def _paired(session):
     static, week, result, assignment = _assignment(session)
-    assignment.loot_key = "TOME_WEAPON_RESOURCES"
+    alt = next(
+        character
+        for character in static.members[0].characters
+        if character.kind is CharacterKind.ALT
+    )
+    assignment.run.participants[0].character_id = alt.id
+    assignment.run.participants[0].designation = "ALT"
+    assignment.recipient_id = alt.id
+    assignment.recipient_kind = "ALT"
+    assignment.loot_key = "WEAPON_TOMESTONE"
     assignment.primary_slot = "WEAPON"
     assignment.effects[0].slot_key = "WEAPON"
+    assignment.effects[0].resulting_category = GearClassification.AUGMENTED_TOME.value
+    session.add(
+        V2PlanAssignment(
+            plan=assignment.plan,
+            run=assignment.run,
+            sort_order=2,
+            floor_number=3,
+            loot_key="WEAPON_AUGMENT",
+            primary_slot="WEAPON",
+            recipient_id=alt.id,
+            recipient_job=alt.job.abbreviation,
+            recipient_kind="ALT",
+            disposition="ASSIGNED",
+            resource_quantity=1,
+            fairness_count=0,
+            explanation="Paired Alt weapon component",
+        )
+    )
     session.flush()
     return static, week, result, assignment
 
@@ -395,3 +423,57 @@ def test_paired_tome_reversal_restores_both_resources(session):
         == 1
         for key in ("WEAPON_TOMESTONE", "WEAPON_AUGMENT")
     )
+
+
+@pytest.mark.parametrize("resource", ["ACCESSORY_GLAZE", "ARMOR_TWINE"])
+def test_material_receipt_rejects_alt_even_for_free_roll_or_stale_assignment(session, resource):
+    static, week, plan, assignment = _paired(session)
+    assignment.loot_key = resource
+    assignment.material_key = resource
+    assignment.effects.clear()
+    session.flush()
+    with pytest.raises(V2ConfirmationError, match="Main-only"):
+        confirm_v2_receipt(session, assignment.id, resource, True)
+    assert session.scalar(select(func.count()).select_from(V2ResourceBalance)) == 0
+
+
+@pytest.mark.parametrize("resource", ["WEAPON_TOMESTONE", "WEAPON_AUGMENT"])
+def test_weapon_tome_receipt_rejects_main(session, resource):
+    static, week, plan, assignment = _paired(session)
+    main_id = assignment.run.participants[1].character_id
+    with pytest.raises(V2ConfirmationError, match="Alt-only"):
+        confirm_v2_receipt(session, assignment.id, resource, True, recipient_id=main_id)
+    assert session.scalar(select(func.count()).select_from(V2ResourceBalance)) == 0
+
+
+def test_separate_paired_assignments_apply_once_from_either_component(session):
+    static, week, plan, anchor = _paired(session)
+    augment = session.scalar(
+        select(V2PlanAssignment).where(
+            V2PlanAssignment.run_id == anchor.run_id, V2PlanAssignment.loot_key == "WEAPON_AUGMENT"
+        )
+    )
+    confirm_v2_receipt(session, anchor.id, "WEAPON_TOMESTONE", True)
+    confirm_v2_receipt(session, augment.id, "WEAPON_AUGMENT", True)
+    first = confirm_v2_application(session, augment.id, True)
+    retry = confirm_v2_application(session, anchor.id, True)
+    assert first == retry
+    assert session.scalar(select(func.count()).select_from(V2EffectLedger)) == 1
+    assert {row.quantity for row in session.scalars(select(V2ResourceBalance))} == {0}
+
+
+def test_augment_receipt_cannot_be_corrected_to_failure_until_paired_application_reversed(session):
+    static, week, plan, anchor = _paired(session)
+    confirm_v2_receipt(session, anchor.id, "WEAPON_TOMESTONE", True)
+    augment_receipt = confirm_v2_receipt(session, anchor.id, "WEAPON_AUGMENT", True)
+    application = confirm_v2_application(session, anchor.id, True)
+    with pytest.raises(V2ConfirmationError, match="Reverse"):
+        correct_v2_receipt(session, augment_receipt.confirmation_id, False, 9, "Wrong receipt")
+    reverse_v2_application(session, application.confirmation_id, 9, "Undo paired upgrade")
+    correct_v2_receipt(session, augment_receipt.confirmation_id, False, 9, "Wrong receipt")
+
+
+def test_receipt_resource_must_match_persisted_assignment(session):
+    static, week, plan, assignment = _assignment(session)
+    with pytest.raises(V2ConfirmationError, match="match"):
+        confirm_v2_receipt(session, assignment.id, "ARMOR_TWINE", True)

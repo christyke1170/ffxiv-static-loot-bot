@@ -130,7 +130,11 @@ class BisEditorView(discord.ui.LayoutView):
                     child
                     for slot, row in zip(slots, controls[:-1], strict=True)
                     for child in (
-                        discord.ui.TextDisplay(SLOT_LABELS[slot.code]),
+                        discord.ui.TextDisplay(
+                            f"{self.content}\n\n{SLOT_LABELS[slot.code]}"
+                            if slot is slots[0]
+                            else SLOT_LABELS[slot.code]
+                        ),
                         row,
                     )
                 ],
@@ -146,8 +150,11 @@ class BisEditorView(discord.ui.LayoutView):
                 if getattr(child, "custom_id", None) == f"bis-editor:slot:{slot_code.value}"
             )
             self.categories[slot_code] = GearClassification(value)
-            self._build()
-            await interaction.response.edit_message(view=self)
+            for child in self.walk_children():
+                if getattr(child, "custom_id", None) == f"bis-editor:slot:{slot_code.value}":
+                    for option in child.options:
+                        option.default = option.value == value
+            await interaction.response.defer()
 
         return callback
 

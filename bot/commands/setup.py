@@ -2,6 +2,7 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import func, select
 
+from app.domain.jobs import JOB_CATALOG
 from app.models import GearSlot, Job
 from app.services.seed import seed_reference_data
 from bot.checks import require_bot_admin
@@ -44,13 +45,13 @@ class Setup(commands.Cog):
         )
         seed_guidance = (
             "\nAction required: run `/setup seed` once for this fresh database."
-            if jobs < 21 or slots < 12
+            if jobs < len(JOB_CATALOG) or slots < 12
             else ""
         )
         await reply(
             interaction,
             f"Version: 0.1.0\nDatabase: {db}\nMigration: {current} / {expected}\n"
-            f"Seed records: jobs {jobs}/21, gear slots {slots}/12\n"
+            f"Seed records: jobs {jobs}/{len(JOB_CATALOG)}, gear slots {slots}/12\n"
             f"Guild: {guild_id}\nSync: {sync}\nStatics: {statics}{seed_guidance}",
             ephemeral=True,
         )

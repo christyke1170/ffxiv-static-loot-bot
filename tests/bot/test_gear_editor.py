@@ -124,3 +124,32 @@ async def test_gear_editor_cancel_discards_changes_and_disappears(bot, interacti
         )
     assert cancelled.response.edits[0]["view"] is not None
     assert "content" not in cancelled.response.edits[0]
+
+
+async def test_gear_selections_keep_controls_and_do_not_reload(
+    bot, interaction_factory, monkeypatch
+):
+    from bot.views.gear import GearEditorView
+
+    static_id, member_id, character_id = _arrange_character(bot)
+    view = GearEditorView(bot, static_id, member_id, character_id, 200, 100)
+    control = next(
+        child
+        for child in view.walk_children()
+        if getattr(child, "custom_id", None) == "gear-editor:slot:WEAPON"
+    )
+
+    def unexpected_load():
+        raise AssertionError("Selections must not query or rebuild the editor")
+
+    monkeypatch.setattr(view, "_load", unexpected_load)
+    for category in (GearClassification.TOME, GearClassification.SAVAGE):
+        control._values = [category.value]
+        interaction = interaction_factory()
+        await view._select_category(GearSlotCode.WEAPON)(interaction)
+        assert interaction.response.edits == []
+        assert interaction.response.deferrals
+        assert view.categories[GearSlotCode.WEAPON] is category
+        assert control in list(view.walk_children())
+    with bot.session_factory() as session:
+        assert session.scalar(select(CharacterGearSlot)) is None

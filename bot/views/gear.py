@@ -306,12 +306,13 @@ class GearEditorView(discord.ui.LayoutView):
 
     def _select_category(self, slot_code: GearSlotCode):
         async def callback(interaction: discord.Interaction) -> None:
-            if not await self._authorized(interaction):
-                return
             value = self._selected_value(f"gear-editor:slot:{slot_code.value}")
             self.categories[slot_code] = None if value == "MISSING" else GearClassification(value)
-            self._build()
-            await interaction.response.edit_message(view=self)
+            for child in self.walk_children():
+                if getattr(child, "custom_id", None) == f"gear-editor:slot:{slot_code.value}":
+                    for option in child.options:
+                        option.default = option.value == value
+            await interaction.response.defer()
 
         return callback
 

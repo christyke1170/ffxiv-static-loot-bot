@@ -5,7 +5,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.models import (
+    Character,
     CharacterGearSlot,
+    CharacterKind,
     GearClassification,
     GearSlot,
     ReclearWorkflowState,
@@ -44,7 +46,11 @@ def confirm_v2_receipt(
 ) -> V2ConfirmationState:
     assignment = _assignment(session, assignment_id)
     _validate_scope(assignment, static_id, week_id)
+    resource_key = validate_resource_key(resource_key)
+    assignment = _resource_assignment(session, assignment, resource_key)
+    assignment_id = assignment.id
     recipient = _recipient(assignment, recipient_id)
+    _validate_recipient_policy(session, recipient, resource_key)
     _validate_active(assignment)
     existing = _existing(session, assignment_id, resource_key, "RECEIPT")
     if existing is not None:
@@ -101,7 +107,16 @@ def confirm_v2_application(
 ) -> V2ConfirmationState:
     assignment = _assignment(session, assignment_id)
     _validate_scope(assignment, static_id, week_id)
+    assignment = _application_assignment(session, assignment)
+    assignment_id = assignment.id
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(
+            select(V2PlanAssignment.id)
+            .where(V2PlanAssignment.id == assignment_id)
+            .with_for_update()
+        ).scalar_one()
     recipient = _recipient(assignment, recipient_id)
+    _validate_recipient_policy(session, recipient, assignment.material_key or assignment.loot_key)
     _validate_active(assignment)
     if assignment.disposition == "FREE_ROLL":
         raise V2ConfirmationError("Free-for-all assignments do not have an application action.")
@@ -129,8 +144,9 @@ def confirm_v2_application(
         raise V2ConfirmationError("Material grants do not have an application action.")
     if _is_paired_tome(assignment):
         for resource in ("WEAPON_TOMESTONE", "WEAPON_AUGMENT"):
-            receipt = _existing(session, assignment.id, resource, "RECEIPT")
-            if receipt is None or not receipt.success:
+            component = _resource_assignment(session, assignment, resource)
+            receipt = _existing(session, component.id, resource, "RECEIPT")
+            if receipt is None or not _effective_success(session, receipt):
                 raise V2ConfirmationError(
                     "Both paired Tome resources must be successfully received first."
                 )
@@ -138,7 +154,7 @@ def confirm_v2_application(
         receipt = _existing(
             session, assignment.id, assignment.material_key or assignment.loot_key, "RECEIPT"
         )
-        if receipt is None or not receipt.success:
+        if receipt is None or not _effective_success(session, receipt):
             raise V2ConfirmationError("The assignment must be successfully received first.")
     with session.begin_nested():
         row = _record_application(session, assignment, recipient, True, actor_id, note)
@@ -149,11 +165,17 @@ def confirm_v2_application(
 
 def read_v2_confirmation_state(session, assignment_id: int) -> V2ConfirmationReadback:
     assignment = _assignment(session, assignment_id)
+    assignment_ids = [assignment.id]
+    if _is_paired_tome(assignment):
+        assignment_ids = [
+            _resource_assignment(session, assignment, key).id
+            for key in ("WEAPON_TOMESTONE", "WEAPON_AUGMENT")
+        ]
     confirmations = tuple(
         _state(row)
         for row in session.scalars(
             select(V2Confirmation)
-            .where(V2Confirmation.assignment_id == assignment_id)
+            .where(V2Confirmation.assignment_id.in_(assignment_ids))
             .order_by(V2Confirmation.id)
         )
     )
@@ -171,7 +193,7 @@ def read_v2_confirmation_state(session, assignment_id: int) -> V2ConfirmationRea
         for row in session.scalars(
             select(V2EffectLedger)
             .join(V2Confirmation)
-            .where(V2Confirmation.assignment_id == assignment_id)
+            .where(V2Confirmation.assignment_id.in_(assignment_ids))
             .order_by(V2EffectLedger.id)
         )
     )
@@ -205,6 +227,8 @@ def correct_v2_receipt(
         raise V2ConfirmationError("Only receipt confirmations can receive receipt corrections.")
     _require_admin_reason(actor_id, reason)
     current = _effective_success(session, confirmation)
+    if corrected_success:
+        _validate_recipient_policy(session, confirmation.recipient_id, confirmation.resource_key)
     if current == corrected_success:
         existing = _latest_correction(session, confirmation.id, "RECEIPT_OUTCOME")
         if existing is not None:
@@ -341,7 +365,65 @@ def _validate_scope(assignment, static_id, week_id):
 
 
 def _is_paired_tome(assignment):
-    return "TOME" in assignment.loot_key.upper() and len(assignment.effects) >= 1
+    return assignment.loot_key in {"WEAPON_TOMESTONE", "WEAPON_AUGMENT"}
+
+
+def _resource_assignment(session, assignment, resource):
+    if resource == (assignment.material_key or assignment.loot_key):
+        return assignment
+    if _is_paired_tome(assignment) and resource in {"WEAPON_TOMESTONE", "WEAPON_AUGMENT"}:
+        component = session.scalar(
+            select(V2PlanAssignment).where(
+                V2PlanAssignment.plan_id == assignment.plan_id,
+                V2PlanAssignment.run_id == assignment.run_id,
+                V2PlanAssignment.recipient_id == assignment.recipient_id,
+                V2PlanAssignment.loot_key == resource,
+            )
+        )
+        if component is not None:
+            return component
+    raise V2ConfirmationError("Resource does not match this persisted assignment.")
+
+
+def _application_assignment(session, assignment):
+    return (
+        _resource_assignment(session, assignment, "WEAPON_TOMESTONE")
+        if _is_paired_tome(assignment)
+        else assignment
+    )
+
+
+def _validate_recipient_policy(session, recipient_id, resource):
+    character = session.get(Character, recipient_id)
+    if resource in {"ACCESSORY_GLAZE", "ARMOR_TWINE"} and character.kind is not CharacterKind.MAIN:
+        raise V2ConfirmationError("Glaze and Twine are Main-only resources.")
+    if (
+        resource in {"WEAPON_TOMESTONE", "WEAPON_AUGMENT"}
+        and character.kind is not CharacterKind.ALT
+    ):
+        raise V2ConfirmationError("Weapon Tomestone and Weapon Augment are Alt-only resources.")
+
+
+def requires_v2_application(session, assignment):
+    """Only successful redeemable receipts need a pending application question."""
+    if (
+        assignment.material_key
+        or not assignment.effects
+        or assignment.disposition == "FREE_ROLL"
+        or assignment.loot_key == "WEAPON_AUGMENT"
+    ):
+        return False
+    resources = (
+        ("WEAPON_TOMESTONE", "WEAPON_AUGMENT")
+        if _is_paired_tome(assignment)
+        else (assignment.loot_key,)
+    )
+    for resource in resources:
+        component = _resource_assignment(session, assignment, resource)
+        receipt = _existing(session, component.id, resource, "RECEIPT")
+        if receipt is None or not _effective_success(session, receipt):
+            return False
+    return True
 
 
 def _recipient(assignment, recipient_id):
@@ -410,6 +492,7 @@ def _effective_success(session, confirmation):
 
 
 def _active_application(session, assignment_id):
+    assignment_id = _application_assignment(session, _assignment(session, assignment_id)).id
     application = session.scalar(
         select(V2Confirmation).where(
             V2Confirmation.assignment_id == assignment_id,
@@ -492,6 +575,7 @@ def _record_application(session, assignment, recipient, success, actor_id, note)
 
 
 def _apply_assignment(session, assignment, recipient, confirmation):
+    _validate_recipient_policy(session, recipient, assignment.material_key or assignment.loot_key)
     resources = (
         ("WEAPON_TOMESTONE", "WEAPON_AUGMENT")
         if _is_paired_tome(assignment)

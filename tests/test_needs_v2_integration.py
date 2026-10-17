@@ -73,3 +73,29 @@ def test_needs_read_is_immutable_and_orm_free(session):
     result = calculate_character_needs_v2(session, character.id)
     assert isinstance(result.slot_results, tuple)
     assert not any(hasattr(row, "__table__") for row in result.slot_results)
+
+
+def test_owned_material_covers_shortage_even_before_base_tome_is_owned(session):
+    static = _static(session)
+    character = static.members[0].characters[0]
+    _bis(session, static, character, GearClassification.AUGMENTED_TOME)
+    set_current_balance(session, static, character, "ARMOR_TWINE", 1)
+    session.flush()
+    need = calculate_character_needs_v2(session, character.id)
+    assert need.material_needs[0].additional_needed == 0
+    assert need.material_needs[0].allocated == 0
+
+
+def test_completed_augmented_tome_slot_no_longer_counts_as_material_need(session):
+    static = _static(session)
+    character = static.members[0].characters[0]
+    head = _bis(session, static, character, GearClassification.AUGMENTED_TOME)
+    session.add(
+        CharacterGearSlot(
+            character_id=character.id,
+            gear_slot_id=head.id,
+            current_classification=GearClassification.AUGMENTED_TOME,
+        )
+    )
+    session.flush()
+    assert calculate_character_needs_v2(session, character.id).material_needs == ()

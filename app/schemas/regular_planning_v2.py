@@ -13,13 +13,12 @@ class RegularScore:
     prior_material_grants: int
     roster_order: int
     character_id: int
+    material_priority: tuple[int, ...] = ()
 
     @property
-    def comparison_key(self) -> tuple[int, int, int, int, int]:
-        return (
+    def comparison_key(self) -> tuple[int, ...]:
+        return self.material_priority or (
             self.hierarchy_position,
-            self.assignments_in_proposal,
-            self.prior_receipts + self.prior_material_grants,
             self.roster_order,
             self.character_id,
         )

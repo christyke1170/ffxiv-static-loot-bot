@@ -40,7 +40,9 @@ async def test_bis_set_renders_valid_v2_payload_and_sam_offhand_default(bot, int
     assert labels == {"CRAFTED_EX", "TOME", "AUGMENTED_TOME", "SAVAGE", "NOT_APPLICABLE"}
 
 
-async def test_bis_selection_callback_edits_only_with_v2_view(bot, interaction_factory):
+async def test_bis_selection_keeps_draft_without_queries_or_message_rebuild(
+    bot, interaction_factory, monkeypatch
+):
     _seed(bot)
     arrange_static(bot)
     initial = interaction_factory()
@@ -54,11 +56,17 @@ async def test_bis_selection_callback_edits_only_with_v2_view(bot, interaction_f
     select._values = [GearClassification.SAVAGE.value]
     selected = interaction_factory()
 
+    def unexpected_load():
+        raise AssertionError("A selection must not reload or rebuild the editor")
+
+    monkeypatch.setattr(view, "_load", unexpected_load)
+
     await view._select_callback(GearSlotCode.WEAPON)(selected)
 
-    assert "content" not in selected.response.edits[0]
-    assert "embeds" not in selected.response.edits[0]
-    assert selected.response.edits[0]["view"] is view
+    assert selected.response.deferrals
+    assert selected.response.edits == []
+    assert view.categories[GearSlotCode.WEAPON] is GearClassification.SAVAGE
+    assert select is next(child for child in view.walk_children() if child is select)
 
 
 async def test_bis_save_error_replaces_editor_with_v2_error_layout(bot, interaction_factory):
