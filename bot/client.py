@@ -9,6 +9,7 @@ from discord.ext import commands
 from app.config import Settings
 from app.database import create_database_engine, create_session_factory
 from bot.errors import handle_app_command_error
+from bot.services.job_icons import sync_job_emojis
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class StaticLootClient(commands.Bot):
         self.settings = settings
         self.database_engine = create_database_engine(settings.database_url)
         self.session_factory = create_session_factory(self.database_engine)
+        self.job_emojis = {}
 
     async def setup_hook(self) -> None:
         extensions = (
@@ -48,6 +50,7 @@ class StaticLootClient(commands.Bot):
             for extension in reversed(loaded):
                 await self.unload_extension(extension)
             raise
+        await sync_job_emojis(self)
         asyncio.get_running_loop().set_exception_handler(self._task_exception_handler)
         self.tree.on_error = handle_app_command_error
         if self.settings.dev_guild_id:

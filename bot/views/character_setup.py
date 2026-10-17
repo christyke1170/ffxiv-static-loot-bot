@@ -7,6 +7,7 @@ from app.models import CharacterKind, Job, StaticMember
 from bot.checks import is_raid_leader
 from bot.services.admin import add_character
 from bot.services.commands import command_session
+from bot.services.job_icons import display_job, job_emoji
 from bot.views.bis import BisMessageView
 from bot.views.setup_base import SetupView
 
@@ -101,7 +102,11 @@ class CharacterSetupView(SetupView):
         self.picker = discord.ui.Select(
             placeholder="Shared Main / Alt job",
             options=[
-                discord.SelectOption(label=f"{job.abbreviation} - {job.name}", value=str(job.id))
+                discord.SelectOption(
+                    label=f"{job.abbreviation} - {job.name}",
+                    value=str(job.id),
+                    emoji=job_emoji(self.bot, job.abbreviation),
+                )
                 for job in self.jobs[self.page * 25 : (self.page + 1) * 25]
             ],
         )
@@ -128,7 +133,7 @@ class CharacterSetupView(SetupView):
             discord.utils.escape_markdown, self.details
         )
         self.text(
-            f"**Review Main / Alt - {job.abbreviation}**\n"
+            f"**Review Main / Alt - {display_job(self.bot, job.abbreviation)}**\n"
             f"Main: {main_name}@{main_world}\nAlt: {alt_name}@{alt_world}\n"
             "New characters start with Crafted / EX gear and the appropriate Offhand state. "
             "Existing matching characters and their gear are preserved."

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.models import Character, V2Plan
 from app.services import load_persisted_plan_v2
 from bot.services.commands import command_session, selected
+from bot.services.job_icons import display_job
 from bot.views.v2_plan import V2PlanView
 
 
@@ -45,7 +46,10 @@ class LootBoard(commands.Cog):
                 if row.recipient_id is not None
             )
             names = {
-                row.id: f"{row.name} - {row.kind.value.title()} - {row.job.abbreviation}"
+                row.id: (
+                    f"{row.name} - {row.kind.value.title()} - "
+                    f"{display_job(self.bot, row.job.abbreviation)}"
+                )
                 for row in session.scalars(select(Character).where(Character.id.in_(ids)))
             }
             static_name, reset_date = static.name, result.proposal.week_start

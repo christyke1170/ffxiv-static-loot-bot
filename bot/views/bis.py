@@ -7,6 +7,7 @@ from app.models import GearClassification, GearSlot, GearSlotCode, Job, Static
 from bot.checks import is_raid_leader
 from bot.services.bis import clear_bis, load_bis, save_bis, validate_categories
 from bot.services.commands import command_session, selected
+from bot.services.job_icons import display_job
 
 LABELS = {
     GearClassification.CRAFTED_EX: "CRAFTED_EX",
@@ -120,7 +121,7 @@ class BisEditorView(discord.ui.LayoutView):
         cancel.callback = self.cancel
         controls.append(discord.ui.ActionRow(save, cancel))
         self.content = (
-            f"**Static:** {static_name}\n**Job:** {job_name}\n"
+            f"**Static:** {static_name}\n**Job:** {display_job(self.bot, job_name)}\n"
             "Choose the desired category for every slot. Saving updates all Main and Alt "
             "characters of this job automatically." + (f"\n{notice}" if notice else "")
         )
@@ -178,7 +179,9 @@ class BisEditorView(discord.ui.LayoutView):
             return
         self.stop()
         await interaction.response.edit_message(
-            view=BisMessageView(f"Saved BiS configuration for {job.abbreviation}.")
+            view=BisMessageView(
+                f"Saved BiS configuration for {display_job(self.bot, job.abbreviation)}."
+            )
         )
 
     async def cancel(self, interaction: discord.Interaction) -> None:
@@ -255,7 +258,7 @@ class BisClearView(discord.ui.LayoutView):
         self.stop()
         await interaction.response.edit_message(
             view=BisMessageView(
-                f"Cleared {job.abbreviation} BiS for {static.name}. "
+                f"Cleared {display_job(self.bot, job.abbreviation)} BiS for {static.name}. "
                 "Matching characters now report missing job BiS."
                 if changed
                 else "BiS was already clear; no changes were written."

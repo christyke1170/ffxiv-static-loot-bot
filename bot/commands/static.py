@@ -16,6 +16,7 @@ from bot.services.admin import (
     select_static,
 )
 from bot.services.commands import command_session, defer, guild_context, pages, reply, selected
+from bot.services.job_icons import display_job
 from bot.views.deletion import DeleteConfirmationView
 
 
@@ -119,7 +120,11 @@ class Static(commands.Cog):
             hierarchy = row.job_hierarchies and next(
                 (h for h in row.job_hierarchies if h.active), None
             )
-            jobs = ", ".join(e.job.abbreviation for e in hierarchy.entries) if hierarchy else "none"
+            jobs = (
+                ", ".join(display_job(self.bot, e.job.abbreviation) for e in hierarchy.entries)
+                if hierarchy
+                else "none"
+            )
             weeks = len(row.reclear_weeks)
             text = "\n".join(
                 (

@@ -6,6 +6,7 @@ from app.models import JobHierarchy
 from bot.checks import require_raid_leader
 from bot.services.admin import set_hierarchy
 from bot.services.commands import command_session, defer, pages, reply, selected
+from bot.services.job_icons import display_job
 
 
 class Hierarchy(commands.Cog):
@@ -34,7 +35,8 @@ class Hierarchy(commands.Cog):
                 "No hierarchy configured."
                 if row is None
                 else "\n".join(
-                    f"{e.position}. {e.job.abbreviation} - {e.job.name}" for e in row.entries
+                    f"{e.position}. {display_job(self.bot, e.job.abbreviation)} - {e.job.name}"
+                    for e in row.entries
                 )
             )
         await reply(interaction, text)

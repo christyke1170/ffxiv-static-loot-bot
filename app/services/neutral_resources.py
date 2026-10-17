@@ -4,7 +4,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.models import Character, Static, V2ResourceBalance
+from app.models import Character, CharacterKind, Static, V2ResourceBalance
 
 BOOK_KEYS = tuple(f"BOOK_FLOOR_{number}" for number in range(1, 5))
 COFFER_KEYS = frozenset(
@@ -57,6 +57,8 @@ def set_current_balance(
     key = validate_resource_key(resource_key)
     quantity = validate_quantity(quantity)
     _require_character(static, character)
+    if key in BOOK_KEYS and character.kind is not CharacterKind.MAIN:
+        raise ValueError("Books are tracked for Mains only.")
     row = current_balance(session, static.id, character.id, key)
     if row is None:
         row = V2ResourceBalance(
@@ -78,6 +80,10 @@ def adjust_current_balance(
     key = validate_resource_key(resource_key)
     if not isinstance(delta, int) or isinstance(delta, bool):
         raise ValueError("Neutral resource balance changes must be whole numbers.")
+    if key in BOOK_KEYS:
+        character = session.get(Character, recipient_id)
+        if character is None or character.kind is not CharacterKind.MAIN:
+            raise ValueError("Books are tracked for Mains only.")
     dialect = session.get_bind().dialect.name
     if dialect in {"postgresql", "sqlite"}:
         if delta < 0:

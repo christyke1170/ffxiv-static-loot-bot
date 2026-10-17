@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.models import Character, V2Confirmation, V2Plan, V2PlanAssignment
 from app.services import close_v2_week, generate_and_persist_weekly_plan
+from app.services.job_labels import job_label
 from app.services.reclear import (
     cancel_reclear_week,
     current_week,
@@ -25,7 +26,7 @@ def _plan(session, week_id):
     return session.scalar(select(V2Plan).where(V2Plan.reclear_week_id == week_id))
 
 
-def _presentation(session, result):
+def _presentation(session, result, job_icons=None):
     proposal = result.proposal
     ids = {
         identifier
@@ -47,7 +48,9 @@ def _presentation(session, result):
         session.scalars(select(Character).where(Character.id.in_(ids))).all() if ids else ()
     )
     names = {
-        row.id: f"{row.name} - {row.kind.value.title()} - {row.job.abbreviation}"
+        row.id: (
+            f"{row.name} - {row.kind.value.title()} - {job_label(row.job.abbreviation, job_icons)}"
+        )
         for row in characters
     }
     missing = ids - names.keys()
@@ -141,7 +144,7 @@ class Reclear(commands.Cog):
             result = generate_and_persist_weekly_plan(
                 session, week.static_id, week.id, interaction.user.id
             )
-            names = _presentation(session, result)[0]
+            names = _presentation(session, result, getattr(self.bot, "job_emojis", {}))[0]
             static_name, reset_date = week.static.name, week.week_start
         await interaction.followup.send(
             view=V2PlanView(self.bot, result, interaction.user.id, names, static_name, reset_date),
@@ -185,7 +188,12 @@ class Reclear(commands.Cog):
                 )
                 return
             close_v2_week(session, week, interaction.user.id)
-        await reply(interaction, "Reclear closed; audit history was retained.", ephemeral=True)
+        await reply(
+            interaction,
+            "Reclear closed. Each participating Main has received one book per floor. "
+            "Closing this week again will not award additional books.",
+            ephemeral=True,
+        )
 
     @group.command(name="cancel", description="Cancel the current weekly loot plan")
     @require_raid_leader(None)

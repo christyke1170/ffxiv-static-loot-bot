@@ -9,6 +9,7 @@ from app.models import (
     BisSet,
     Character,
     CharacterGearSlot,
+    CharacterKind,
     GearClassification,
     GearSlot,
     GearSlotCode,
@@ -254,8 +255,10 @@ def _load_one(session, character: Character) -> CharacterNeedsState:
         NeedsMaterialTypeState(material_ids[code], code, code.replace("_", " ").title())
         for code in _MATERIAL_CODES
     )
-    books = tuple(
-        (number, balances.get(f"BOOK_FLOOR_{number}", 0)) for number in loot_rules.floors()
+    books = (
+        tuple((number, balances.get(f"BOOK_FLOOR_{number}", 0)) for number in loot_rules.floors())
+        if character.kind is CharacterKind.MAIN
+        else ()
     )
     material_quantities = tuple(
         (material_ids[code], balances.get(code, 0)) for code in _MATERIAL_CODES

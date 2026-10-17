@@ -7,6 +7,7 @@ from datetime import date
 import discord
 
 from app.models import ClearMode
+from app.services.job_labels import job_label
 from bot.checks import is_raid_leader
 from bot.services.commands import selected
 
@@ -63,6 +64,7 @@ def v2_plan_pages(
     names: dict[int, str] | None = None,
     static_name: str | None = None,
     reset_date: date | None = None,
+    job_icons=None,
 ) -> list[str]:
     """Render only neutral persisted-plan fields, split into Discord-sized pages."""
     names = names or {}
@@ -86,7 +88,7 @@ def v2_plan_pages(
         assignments = proposal.assignments
         roster = "\n".join(
             f"- {names.get(row.recipient_id, 'Unknown character')} "
-            f"({row.recipient_job or 'Job unavailable'})"
+            f"({job_label(row.recipient_job, job_icons)})"
             for row in assignments
             if row.recipient_id is not None
         )
@@ -151,7 +153,9 @@ class V2PlanView(discord.ui.LayoutView):
         self.static_name = static_name
         self.reset_date = reset_date
         self.page = 0
-        self.pages = v2_plan_pages(result, self.names, self.static_name, self.reset_date)
+        self.pages = v2_plan_pages(
+            result, self.names, self.static_name, self.reset_date, getattr(bot, "job_emojis", {})
+        )
         self._build()
 
     def _build(self):

@@ -14,6 +14,7 @@ from bot.services.admin import (
     set_character_active,
 )
 from bot.services.commands import command_session, defer, pages, reply, selected
+from bot.services.job_icons import display_job
 from bot.views.character_setup import CharacterSetupView
 from bot.views.deletion import DeleteConfirmationView
 
@@ -168,7 +169,8 @@ class Character(commands.Cog):
             interaction,
             f"Updated {discord.utils.escape_markdown(row.name)}@"
             f"{discord.utils.escape_markdown(row.world)} ({row.kind.value}, "
-            f"{row.job.abbreviation}); relationships and history were retained.{suffix}",
+            f"{display_job(self.bot, row.job.abbreviation)}); "
+            f"relationships and history were retained.{suffix}",
             ephemeral=True,
         )
 
@@ -218,13 +220,15 @@ class Character(commands.Cog):
                 m for m in static.members if member is None or m.discord_user_id == member.id
             ]
             rows = [
-                f"{c.name}@{c.world} - {c.job.abbreviation} - "
+                f"{discord.utils.escape_markdown(c.name)}@"
+                f"{discord.utils.escape_markdown(c.world)} - "
+                f"{display_job(self.bot, c.job.abbreviation)} - "
                 f"{c.kind} - {'active' if c.active else 'inactive'}"
                 for m in members
                 for c in m.characters
                 if kind is None or c.kind.value == kind.upper()
             ]
-        for page in pages([discord.utils.escape_markdown(x) for x in rows]):
+        for page in pages(rows):
             await reply(interaction, page)
 
 

@@ -182,13 +182,13 @@ def _build_player(session: Session, character: Character, item_level) -> BoardPl
     books_owned = dict(state.books)
     books = tuple(
         BoardBook(
-            floor.floor_number,
+            floor_number,
             0,
             0,
             0,
-            books_owned.get(floor.floor_number, 0),
+            available,
         )
-        for floor in sorted(state.floors, key=lambda value: value.floor_number)
+        for floor_number, available in sorted(books_owned.items())
     )
     owned = dict(state.material_quantities)
     required = {row.material_type_id: row.additional_needed for row in needs.material_needs}

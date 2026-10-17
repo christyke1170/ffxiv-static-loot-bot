@@ -34,6 +34,9 @@ static-loot-validate = "app.cli:validate"
 [tool.setuptools.packages.find]
 include = ["app*", "bot*"]
 
+[tool.setuptools.package-data]
+bot = ["assets/jobs/*.png", "assets/jobs/SOURCES.md"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

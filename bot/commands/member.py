@@ -11,6 +11,7 @@ from bot.services.admin import (
     reactivate_member,
 )
 from bot.services.commands import command_session, defer, pages, reply, selected
+from bot.services.job_icons import display_job
 from bot.views.deletion import DeleteConfirmationView
 
 
@@ -36,11 +37,17 @@ class Member(commands.Cog):
         with command_session(self.bot) as session:
             static = selected(session, interaction)
             rows = [
-                f"{m.display_name} - {'active' if m.active else 'inactive'} - "
-                + ", ".join(f"{c.name}@{c.world} ({c.job.abbreviation})" for c in m.characters)
+                f"{discord.utils.escape_markdown(m.display_name)} - "
+                f"{'active' if m.active else 'inactive'} - "
+                + ", ".join(
+                    f"{discord.utils.escape_markdown(c.name)}@"
+                    f"{discord.utils.escape_markdown(c.world)} "
+                    f"({display_job(self.bot, c.job.abbreviation)})"
+                    for c in m.characters
+                )
                 for m in static.members
             ]
-        for page in pages([discord.utils.escape_markdown(x) for x in rows]):
+        for page in pages(rows):
             await reply(interaction, page)
 
     @group.command(name="deactivate")

@@ -2,9 +2,20 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.models import AuditLog, ClearMode, ReclearWorkflowState, V2Plan
+from app.domain import loot_rules
+from app.models import (
+    AuditLog,
+    CharacterKind,
+    ClearMode,
+    ReclearWeek,
+    ReclearWorkflowState,
+    V2Plan,
+    V2PlanParticipant,
+    V2PlanRun,
+)
+from app.services.neutral_resources import adjust_current_balance
 from app.services.planning_state import PlanningStateError, load_planning_state
 from app.services.regular_planning_v2 import generate_regular_plan_v2
 from app.services.split_planning_v2 import generate_split_plan_v2
@@ -22,26 +33,65 @@ class V2PlanOrchestrationError(ValueError):
 
 
 def close_v2_week(session, week, actor_id: int):
-    """Close an active V2 week without consulting legacy assignment state."""
+    """Close a completed week and award Main books exactly once, atomically."""
     if actor_id is None:
         raise V2PlanOrchestrationError("An actor identity is required to close a V2 week.")
-    if week.workflow_state is ReclearWorkflowState.CANCELLED:
-        raise V2PlanOrchestrationError("A cancelled V2 week cannot be closed.")
-    if week.workflow_state is ReclearWorkflowState.CLOSED:
-        return week
-    week.workflow_state = ReclearWorkflowState.CLOSED
-    week.finalized_at = datetime.now(UTC)
-    session.add(
-        AuditLog(
-            static_id=week.static_id,
-            actor_discord_user_id=actor_id,
-            action="V2_RECLEAR_WEEK_CLOSED",
-            entity_type="ReclearWeek",
-            entity_id=str(week.id),
-            details="V2 confirmation workflow closed",
+    try:
+        # Claim closure in the database, even when another session has a stale week.
+        closed = session.execute(
+            update(ReclearWeek)
+            .where(
+                ReclearWeek.id == week.id,
+                ReclearWeek.workflow_state.not_in(
+                    (ReclearWorkflowState.CLOSED, ReclearWorkflowState.CANCELLED)
+                ),
+            )
+            .values(workflow_state=ReclearWorkflowState.CLOSED, finalized_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
         )
-    )
-    session.flush()
+        session.refresh(week)
+        if closed.rowcount != 1:
+            if week.workflow_state is ReclearWorkflowState.CLOSED:
+                return week
+            raise V2PlanOrchestrationError("A cancelled V2 week cannot be closed.")
+        recipients = tuple(
+            session.scalars(
+                select(V2PlanParticipant.character_id)
+                .join(V2PlanRun, V2PlanParticipant.run_id == V2PlanRun.id)
+                .join(V2Plan, V2PlanRun.plan_id == V2Plan.id)
+                .where(
+                    V2Plan.reclear_week_id == week.id,
+                    V2Plan.static_id == week.static_id,
+                    V2PlanParticipant.designation == CharacterKind.MAIN.value,
+                )
+                .distinct()
+                .order_by(V2PlanParticipant.character_id)
+            )
+        )
+        if not recipients:
+            raise V2PlanOrchestrationError("Generate a loot plan before closing the reclear.")
+        for recipient_id in recipients:
+            for floor in loot_rules.floors():
+                adjust_current_balance(
+                    session, week.static_id, recipient_id, f"BOOK_FLOOR_{floor}", 1
+                )
+        session.add(
+            AuditLog(
+                static_id=week.static_id,
+                actor_discord_user_id=actor_id,
+                action="V2_RECLEAR_WEEK_CLOSED",
+                entity_type="ReclearWeek",
+                entity_id=str(week.id),
+                details=(
+                    "V2 confirmation workflow closed; awarded one book per floor to "
+                    f"{len(recipients)} participating Mains"
+                ),
+            )
+        )
+        session.flush()
+    except Exception:
+        session.rollback()
+        raise
     return week
 
 

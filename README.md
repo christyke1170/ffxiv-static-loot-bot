@@ -85,7 +85,11 @@ WAL, and a busy timeout but is a one-process deployment only.
   receive a Savage Weapon are excluded from this weapon upgrade opportunity.
 - Floor 4's random weapon is updated manually in current gear and never enters
   the planned drop list. A newly generated plan reads those updated categories.
-- Books are informational only and never affect proposals.
+- Closing a resolved reclear awards each saved-plan Main one book for
+  each of floors 1-4, once per week, in both Regular and Split mode.
+  Alt books are not tracked or displayed. Repeated closure does not duplicate
+  awards. Book spending and balance corrections are handled manually by administrators. Book balances
+  never affect loot proposals.
 - `/reclear setup` creates only a DRAFT week; an administrator runs
   `/reclear plan` to generate the V2 plan.
 - Reference-backed commands require the one-time fresh-database `/setup seed`.
@@ -132,6 +136,15 @@ order. Add future jobs there and run `/setup seed`; there is no Discord job
 catalog editor. Seeding preserves saved BiS and hierarchy configurations.
 Existing Statics can place newly added jobs using `/hierarchy set`. Job setup
 menus paginate as the catalog grows.
+
+Job icons are application-owned Discord emojis. On startup the bot fetches its
+own emoji list and uploads only missing `job_sam`, `job_drk`, etc. from bundled
+assets. No server emoji slots or external-emoji permissions are needed. Existing
+icons are reused, and unavailable icons fall back to plain job abbreviations.
+The assets and pinned source attribution are in `bot/assets/jobs/`. When adding
+a job to the code catalog, add its lowercase-abbreviation PNG there as well.
+Job icons appear in message headings, plan recipients, and dropdown emoji fields;
+gearboard headings are outside code blocks so custom emojis render correctly.
 
 ## V2 confirmation workflow
 

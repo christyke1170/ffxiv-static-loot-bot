@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from app.models import GearClassification
 from app.schemas.board import BoardPlayer, DisplayStatus, StaticGearBoard
 from app.schemas.needs_v2 import NeedsV2Status
+from app.services.job_labels import job_label
 
 DISCORD_TEXT_LIMIT = 2000
 PLAYERS_PER_PAGE = 4
@@ -83,7 +84,9 @@ OVERVIEW_SLOT_PAIRS = (
 )
 
 
-def overview_table(board: StaticGearBoard, page: int = 0) -> tuple[str, tuple[str, ...]]:
+def overview_table(
+    board: StaticGearBoard, page: int = 0, *, job_icons=None
+) -> tuple[str, tuple[str, ...]]:
     page_count = max((len(board.players) + PLAYERS_PER_PAGE - 1) // PLAYERS_PER_PAGE, 1)
     page = min(max(page, 0), page_count - 1)
     players = board.players[page * PLAYERS_PER_PAGE : (page + 1) * PLAYERS_PER_PAGE]
@@ -94,13 +97,17 @@ def overview_table(board: StaticGearBoard, page: int = 0) -> tuple[str, tuple[st
     if not players:
         return "No active main characters.", tuple(dict.fromkeys(warnings))
     lines = []
+    starts = []
+    headings = []
     for index, player in enumerate(players):
         if index:
             lines.append("")
+        starts.append(len(lines))
         name = truncate(player.display_name, 30)
         kind = truncate(player.character_kind.title(), 8)
         job = truncate(player.job or "?", 8)
         lines.append(f"{name} · {job} · {kind}")
+        headings.append(f"**{name} - {job_label(player.job, job_icons)} - {kind}**")
         average = player.average_item_level if player.average_item_level is not None else "N/A"
         lines.append(f"Average iLevel: {average}")
         lines.append(
@@ -111,6 +118,12 @@ def overview_table(board: StaticGearBoard, page: int = 0) -> tuple[str, tuple[st
         )
         lines.append("")
         lines.extend(_slot_lines(player))
+    if job_icons:
+        sections = []
+        for index, start in enumerate(starts):
+            end = starts[index + 1] - 1 if index + 1 < len(starts) else len(lines)
+            sections.append(headings[index] + "\n" + _bounded_codeblock(lines[start + 1 : end]))
+        return "\n\n".join(sections), tuple(dict.fromkeys(warnings))
     return _bounded_codeblock(lines), tuple(dict.fromkeys(warnings))
 
 
@@ -176,6 +189,8 @@ def player_table(player: BoardPlayer) -> tuple[str, tuple[str, ...]]:
 
 def player_books(player: BoardPlayer) -> str:
     """Format effective, currently spendable books for a player detail view."""
+    if not player.books:
+        return ""
     lines = ["**Books**"]
     lines.extend(f"Floor {book.floor_number} Books: {book.available}" for book in player.books)
     return "\n".join(lines)
@@ -246,6 +261,7 @@ def summary_table(board: StaticGearBoard) -> tuple[str, tuple[str, ...]]:
                 book.available for book in player.books if book.floor_number == floor
             )
             for player in board.players
+            if any(book.floor_number == floor for book in player.books)
         }
         common = next(iter(values.values()), 0)
         lines.append(f"Floor {floor}: {common}")

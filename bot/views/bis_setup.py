@@ -8,6 +8,7 @@ from app.models import BisSet, BisSetItem, GearSlot, GearSlotCode, Job
 from app.models import GearClassification as Category
 from bot.services.bis import load_bis, save_bis, validate_categories
 from bot.services.commands import command_session
+from bot.services.job_icons import display_job, job_emoji
 from bot.views.bis import SLOT_LABELS, BisEditorView
 from bot.views.setup_base import SetupView, remember_selection
 
@@ -41,12 +42,13 @@ def setup_jobs(session, static_id):
     return jobs, configured
 
 
-def job_options(jobs, configured):
+def job_options(jobs, configured, icons=None):
     return [
         discord.SelectOption(
             label=f"{job.abbreviation} - {'Configured' if job.id in configured else 'Missing'}",
             value=str(job.id),
             description=job.name,
+            emoji=(icons or {}).get(job.abbreviation),
         )
         for job in jobs
     ]
@@ -71,7 +73,8 @@ class BisSetupView(SetupView):
         )
         page_jobs = self.jobs[page * 25 : (page + 1) * 25]
         picker = discord.ui.Select(
-            placeholder="Configure a job", options=job_options(page_jobs, self.configured)
+            placeholder="Configure a job",
+            options=job_options(page_jobs, self.configured, getattr(bot, "job_emojis", {})),
         )
         picker.callback = self.edit_job
         self.picker = picker
@@ -129,7 +132,7 @@ class BisBatchView(SetupView):
     def build(self):
         self.clear_items()
         self.text(
-            f"**{self.job_name} BiS - unsaved draft**\n"
+            f"**{display_job(self.bot, self.job_name)} BiS - unsaved draft**\n"
             "Choose slots and a category, then Apply to selected slots. Review before saving.\n\n"
             + "\n".join(
                 f"{SLOT_LABELS[slot.code]}: {self.categories[slot.code].value}"
@@ -214,7 +217,7 @@ class BisBatchView(SetupView):
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
             return
-        await self.back(interaction, f"Saved {self.job_name} BiS.")
+        await self.back(interaction, f"Saved {display_job(self.bot, self.job_name)} BiS.")
 
     async def individual(self, interaction):
         view = BisEditorView(self.bot, self.static_id, self.job_id, self.owner_id, self.guild_id)
@@ -254,7 +257,11 @@ class BisCopyView(SetupView):
             "uses the source Weapon category."
         )
         if self.review:
-            names = [job.abbreviation for job in self.jobs if job.id in self.targets]
+            names = [
+                display_job(self.bot, job.abbreviation)
+                for job in self.jobs
+                if job.id in self.targets
+            ]
             categories = self.review[0]
             self.text(
                 "**Review: "
@@ -270,7 +277,10 @@ class BisCopyView(SetupView):
             placeholder="Source saved job",
             options=[
                 discord.SelectOption(
-                    label=job.abbreviation, value=str(job.id), default=job.id == self.source_id
+                    label=job.abbreviation,
+                    value=str(job.id),
+                    default=job.id == self.source_id,
+                    emoji=job_emoji(self.bot, job.abbreviation),
                 )
                 for job in source_jobs
             ],
@@ -283,7 +293,10 @@ class BisCopyView(SetupView):
             max_values=len(page_jobs),
             options=[
                 discord.SelectOption(
-                    label=job.abbreviation, value=str(job.id), default=job.id in self.targets
+                    label=job.abbreviation,
+                    value=str(job.id),
+                    default=job.id in self.targets,
+                    emoji=job_emoji(self.bot, job.abbreviation),
                 )
                 for job in page_jobs
             ],

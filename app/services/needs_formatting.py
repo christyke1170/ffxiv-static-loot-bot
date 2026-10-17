@@ -1,12 +1,13 @@
 """Compact Discord-safe formatting for neutral needs results."""
 
 from app.schemas.needs_v2 import CharacterNeedsResult, NeedsV2Status
+from app.services.job_labels import job_label
 
 
-def format_needs_player(result: CharacterNeedsResult) -> str:
+def format_needs_player(result: CharacterNeedsResult, *, job_icons=None) -> str:
     """Render one character's category-only needs without persistence details."""
     lines = [
-        f"{_safe(result.character_name)} - {_safe(result.job_abbreviation or '?')}",
+        f"{_safe(result.character_name)} - {job_label(result.job_abbreviation, job_icons)}",
         f"Complete: {result.complete_slot_count}/{result.applicable_slot_count} applicable slots",
         f"Full BiS: {'yes' if result.full_bis else 'no'}",
     ]
@@ -49,7 +50,7 @@ def format_needs_player(result: CharacterNeedsResult) -> str:
         lines.extend(
             [
                 "",
-                "Book balances (recorded manually)",
+                "Book balances (spending recorded manually)",
                 *(f"Floor {row.floor_number}: {row.available}" for row in result.book_balances),
             ]
         )

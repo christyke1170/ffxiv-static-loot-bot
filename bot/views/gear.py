@@ -7,6 +7,7 @@ from sqlalchemy.orm import joinedload
 from app.models import (
     Character,
     CharacterGearSlot,
+    CharacterKind,
     GearClassification,
     GearSlot,
     GearSlotCode,
@@ -18,6 +19,7 @@ from app.services.gear import clear_gear, set_gear
 from app.services.neutral_resources import set_current_balance
 from bot.checks import is_raid_leader
 from bot.services.commands import command_session, selected
+from bot.services.job_icons import display_job
 
 GEAR_EDITOR_TIMEOUT = 600.0
 MAX_COMPONENTS = 40
@@ -203,7 +205,9 @@ class GearEditorView(discord.ui.LayoutView):
                 character.job.uses_offhand,
                 slots,
                 current,
-                tuple((number, number, balances.get(number, 0)) for number in range(1, 5)),
+                tuple((number, number, balances.get(number, 0)) for number in range(1, 5))
+                if character.kind is CharacterKind.MAIN
+                else (),
             )
 
     def _build(self, notice: str | None = None) -> None:
@@ -248,14 +252,13 @@ class GearEditorView(discord.ui.LayoutView):
         cancel.callback = self.cancel
         selected_label = "Edit all gear slots"
         self.content = (
-            f"**{discord.utils.escape_markdown(name)} - {kind} - {job}**\n"
-            f"{selected_label}\n\n"
-            "**Books**\n"
-            + (
-                "\n".join(f"Floor {number}: {available}" for _, number, available in books)
-                or "None"
-            )
+            f"**{discord.utils.escape_markdown(name)} - {kind} - {display_job(self.bot, job)}**\n"
+            f"{selected_label}"
         )
+        if books:
+            self.content += "\n\n**Books**\n" + "\n".join(
+                f"Floor {number}: {available}" for _, number, available in books
+            )
         if notice:
             self.content += f"\n{notice}"
         controls = []
@@ -269,7 +272,7 @@ class GearEditorView(discord.ui.LayoutView):
             (
                 discord.ui.TextDisplay(SLOT_LABELS[last_slot.code]),
                 discord.ui.ActionRow(slot_controls[-1]),
-                discord.ui.ActionRow(adjust_books, save, cancel),
+                discord.ui.ActionRow(*([adjust_books] if books else []), save, cancel),
             )
         )
         for control in controls:
@@ -287,7 +290,7 @@ class GearEditorView(discord.ui.LayoutView):
             return
         if not books:
             await interaction.response.send_message(
-                "This tier has no configured floors.", ephemeral=True
+                "Books are tracked for Mains only.", ephemeral=True
             )
             return
         await interaction.response.send_modal(BookAdjustmentModal(self, books))

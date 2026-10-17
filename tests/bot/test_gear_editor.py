@@ -70,6 +70,21 @@ async def test_gear_editor_has_all_labeled_slot_dropdowns_and_adjust_books(
     assert any(child.custom_id == "gear-editor:cancel" for child in selects)
 
 
+async def test_alt_gear_editor_has_no_book_balances_or_adjustment_button(bot):
+    from bot.views.gear import GearEditorView
+
+    static_id, member_id, character_id = _arrange_character(bot)
+    with bot.session_factory() as session:
+        session.get(Character, character_id).kind = CharacterKind.ALT
+        session.commit()
+    view = GearEditorView(bot, static_id, member_id, character_id, 200, 100)
+    assert "Books" not in view.content
+    assert not any(
+        getattr(child, "custom_id", None) == "gear-editor:adjust-books"
+        for child in view.walk_children()
+    )
+
+
 async def test_gear_editor_serialized_action_rows_fit_discord_width_limit(bot, interaction_factory):
     from bot.views.gear import GearEditorView
 

@@ -127,7 +127,9 @@ class Gear(commands.Cog):
             static = selected(session, interaction)
             target = character(session, static, character_name)
             result = calculate_character_needs_v2(session, target.id)
-        await reply(interaction, format_needs_player(result))
+        await reply(
+            interaction, format_needs_player(result, job_icons=getattr(self.bot, "job_emojis", {}))
+        )
 
     @group.command(name="import")
     @require_raid_leader(None)

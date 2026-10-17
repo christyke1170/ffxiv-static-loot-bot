@@ -5,6 +5,7 @@ from app.models import GearSlot
 from bot.checks import require_raid_leader
 from bot.services.bis import resolve_job, summarize_bis
 from bot.services.commands import command_session, defer, reply, selected
+from bot.services.job_icons import display_job
 from bot.views.bis import BisClearView, BisEditorView
 from bot.views.bis_setup import BisSetupView
 
@@ -48,7 +49,8 @@ class Bis(commands.Cog):
             summary = summarize_bis(session, static, job_row)
             if summary.bis_set is None:
                 text = (
-                    f"No BiS is configured for {job_row.abbreviation} in {static.name}. "
+                    f"No BiS is configured for {display_job(self.bot, job_row.abbreviation)} "
+                    f"in {static.name}. "
                     "Use /bis set."
                 )
             else:
@@ -60,7 +62,7 @@ class Bis(commands.Cog):
                 complete = len(items) == slot_count
                 lines = [
                     f"Static: {static.name}",
-                    f"Job: {job_row.abbreviation}",
+                    f"Job: {display_job(self.bot, job_row.abbreviation)}",
                     f"Offhand applicable: {'yes' if job_row.uses_offhand else 'no'}",
                     f"Complete: {'yes' if complete else 'no'}",
                     f"Active Mains: {summary.main_count}",
@@ -79,7 +81,8 @@ class Bis(commands.Cog):
             job_row = resolve_job(session, job)
             if summarize_bis(session, static, job_row).bis_set is None:
                 raise ValueError(
-                    f"No BiS is configured for {job_row.abbreviation} in {static.name}."
+                    f"No BiS is configured for {display_job(self.bot, job_row.abbreviation)} "
+                    f"in {static.name}."
                 )
             view = BisClearView(
                 self.bot, static.id, job_row.id, interaction.user.id, interaction.guild.id

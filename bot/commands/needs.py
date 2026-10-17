@@ -4,6 +4,7 @@ from discord.ext import commands
 from app.models import CharacterKind
 from app.schemas.needs_v2 import NeedsV2Status
 from app.services.formatting import safe_text
+from app.services.job_labels import job_label
 from app.services.needs_formatting import format_needs_player
 from app.services.needs_v2 import calculate_character_needs_v2
 from bot.services.commands import command_session, defer, reply, selected
@@ -30,9 +31,10 @@ class Needs(commands.Cog):
         )
 
     @staticmethod
-    def _player_line(result):
+    def _player_line(result, job_icons=None):
         return (
-            f"{safe_text(result.character_name)} ({safe_text(result.job_abbreviation or '?')}) - "
+            f"{safe_text(result.character_name)} "
+            f"({job_label(result.job_abbreviation, job_icons)}) - "
             f"{result.complete_slot_count}/{result.applicable_slot_count} applicable slots"
         )
 
@@ -56,7 +58,9 @@ class Needs(commands.Cog):
             static = selected(session, interaction)
             target = character(session, static, character_name)
             result = calculate_character_needs_v2(session, target.id)
-        await reply(interaction, format_needs_player(result))
+        await reply(
+            interaction, format_needs_player(result, job_icons=getattr(self.bot, "job_emojis", {}))
+        )
 
     @group.command(name="floor")
     async def floor(self, interaction, floor_number: int):
@@ -95,7 +99,7 @@ class Needs(commands.Cog):
                 calculate_character_needs_v2(session, row.id) for row in self._characters(static)
             )
             lines = [
-                f"{self._player_line(result)} - "
+                f"{self._player_line(result, getattr(self.bot, 'job_emojis', {}))} - "
                 + (
                     ", ".join(
                         f"{safe_text(row.material_name)}: owned {row.owned}, "
@@ -118,7 +122,7 @@ class Needs(commands.Cog):
                 calculate_character_needs_v2(session, row.id) for row in self._characters(static)
             )
             lines = [
-                f"{self._player_line(result)} - "
+                f"{self._player_line(result, getattr(self.bot, 'job_emojis', {}))} - "
                 + ", ".join(
                     f"Floor {row.floor_number}: {row.available}" for row in result.book_balances
                 )
@@ -127,7 +131,7 @@ class Needs(commands.Cog):
             warnings = self._warning_text(results)
         await reply(
             interaction,
-            "Book balances (informational; administrator spending is recorded manually)\n"
+            "Book balances (awarded on reclear close; spending is recorded manually)\n"
             + "\n".join(lines)
             + warnings,
         )

@@ -24,6 +24,25 @@ from app.services.neutral_resources import (
 from tests.test_v2_planning_state import _static
 
 
+def test_alt_books_cannot_be_set_or_incremented_and_old_balances_are_ignored(session):
+    from app.services.needs_state import load_character_needs_state
+
+    static = _static(session)
+    alt = next(c for m in static.members for c in m.characters if c.kind is CharacterKind.ALT)
+    with pytest.raises(ValueError, match="Mains only"):
+        set_current_balance(session, static, alt, "BOOK_FLOOR_1", 3)
+    with pytest.raises(ValueError, match="Mains only"):
+        adjust_current_balance(session, static.id, alt.id, "BOOK_FLOOR_1", 1)
+    # A balance from an older version must not appear in current needs or displays.
+    session.add(
+        V2ResourceBalance(
+            static_id=static.id, recipient_id=alt.id, resource_key="BOOK_FLOOR_1", quantity=3
+        )
+    )
+    session.flush()
+    assert load_character_needs_state(session, alt.id).books == ()
+
+
 @pytest.mark.parametrize("key", sorted(SUPPORTED_RESOURCE_KEYS))
 def test_every_supported_logical_key_validates(key):
     assert validate_resource_key(key) == key

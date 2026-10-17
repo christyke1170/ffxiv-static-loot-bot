@@ -11,6 +11,7 @@ from app.services.formatting import (
     player_table,
     summary_table,
 )
+from bot.services.job_icons import display_job, job_emoji
 
 GEARBOARD_TIMEOUT = 300.0
 MAX_COMPONENTS_V2_CHILDREN = 40
@@ -67,9 +68,14 @@ class GearBoardView(discord.ui.LayoutView):
             else:
                 table, warnings = player_table(player)
                 table = f"{table}\n{player_books(player)}"
-                subtitle = f"{player.display_name} - {player.character_name} ({player.job or '?'})"
+                subtitle = (
+                    f"{player.display_name} - {player.character_name} "
+                    f"({display_job(self.bot, player.job)})"
+                )
         else:
-            table, warnings = overview_table(self.board, self.page)
+            table, warnings = overview_table(
+                self.board, self.page, job_icons=getattr(self.bot, "job_emojis", {})
+            )
             subtitle = f"Overview - page {self.page + 1}/{self.page_count}"
         warning_text = "\n".join(f"- {warning}" for warning in warnings)
         footer = (
@@ -101,6 +107,7 @@ class GearBoardView(discord.ui.LayoutView):
                     label=f"{player.display_name} ({player.job or '?'})"[:100],
                     value=str(player.character_id),
                     description=player.character_name[:100],
+                    emoji=job_emoji(self.bot, player.job),
                 )
                 for player in self.board.players
             ),
